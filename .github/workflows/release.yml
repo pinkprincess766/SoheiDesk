@@ -1,0 +1,171 @@
+# Builds SoheiDesk installers for macOS, Windows, and Linux.
+#
+# How to run:
+#   1. Push this repo to GitHub
+#   2. Actions → "Build all platforms" → Run workflow
+#   OR push a tag: git tag v0.4.0 && git push origin v0.4.0
+#
+# Download: open the finished run → Artifacts → soheidesk-macos / windows / linux
+
+name: Build all platforms
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-macos:
+    name: macOS (universal)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - run: pnpm install
+
+      - name: Build universal macOS app + dmg
+        run: pnpm tauri build --target universal-apple-darwin
+
+      - name: Collect macOS artifacts
+        run: |
+          mkdir -p dist-artifacts
+          find src-tauri/target -type f \( -name '*.dmg' -o -name '*.app' \) 2>/dev/null | head
+          # Copy dmg and zip the .app
+          cp -v src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg dist-artifacts/ 2>/dev/null || true
+          cp -v src-tauri/target/release/bundle/dmg/*.dmg dist-artifacts/ 2>/dev/null || true
+          if [ -d src-tauri/target/universal-apple-darwin/release/bundle/macos/SoheiDesk.app ]; then
+            ditto -c -k --sequesterRsrc --keepParent \
+              src-tauri/target/universal-apple-darwin/release/bundle/macos/SoheiDesk.app \
+              dist-artifacts/SoheiDesk-macos-universal.app.zip
+          elif [ -d src-tauri/target/release/bundle/macos/SoheiDesk.app ]; then
+            ditto -c -k --sequesterRsrc --keepParent \
+              src-tauri/target/release/bundle/macos/SoheiDesk.app \
+              dist-artifacts/SoheiDesk-macos.app.zip
+          fi
+          ls -lah dist-artifacts || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: soheidesk-macos
+          path: dist-artifacts/*
+          if-no-files-found: error
+          retention-days: 30
+
+  build-windows:
+    name: Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - run: pnpm install
+
+      - name: Build Windows installers
+        run: pnpm tauri build
+
+      - name: Collect Windows artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist-artifacts
+          Get-ChildItem -Path src-tauri\target\release\bundle -Recurse -Include *.msi,*.exe |
+            ForEach-Object { Copy-Item $_.FullName -Destination dist-artifacts\ }
+          Get-ChildItem dist-artifacts
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: soheidesk-windows
+          path: dist-artifacts/*
+          if-no-files-found: error
+          retention-days: 30
+
+  build-linux:
+    name: Linux
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            libfuse2
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - run: pnpm install
+
+      - name: Build Linux packages
+        run: pnpm tauri build
+
+      - name: Collect Linux artifacts
+        run: |
+          mkdir -p dist-artifacts
+          find src-tauri/target/release/bundle -type f \( \
+            -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \
+          \) -exec cp -v {} dist-artifacts/ \;
+          ls -lah dist-artifacts
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: soheidesk-linux
+          path: dist-artifacts/*
+          if-no-files-found: error
+          retention-days: 30

@@ -1,0 +1,54 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Dependencies & build
+node_modules
+dist
+dist-ssr
+dist-artifacts
+*.local
+
+# Tauri / Rust
+src-tauri/target
+src-tauri/gen/schemas
+
+# Env & secrets (never commit)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa*
+credentials*
+secrets*
+
+# OS / editor
+.DS_Store
+.idea
+.vscode/*
+!.vscode/extensions.json
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Local installers / large binaries (build on CI or locally, don't push)
+*.dmg
+*.AppImage
+*.msi
+*.exe
+*.app
+
+# Duplicate brand sources in repo root (canonical copies live in assets/brand/)
+/grok-image-*.jpg
+/5e290c76-*.jpg
+
+# Apple Pages originals if reappear
+*.pages

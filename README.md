@@ -90,7 +90,7 @@ You do **not** need: coding skills, Python, Node, or a â€œdeveloper environmentâ
 ### Steps
 
 1. In **Downloads**, find a file like  
-   `SoheiDesk_0.4.0_universal.dmg`  
+   `SoheiDesk_1.0.0_universal.dmg`  
    (the version number may differ).
 2. **Double-click** it.
 3. A small window appears with the **SoheiDesk** icon and **Applications**.

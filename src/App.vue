@@ -99,7 +99,7 @@ onUnmounted(() => {
         <router-link to="/settings">Настройки</router-link>
       </nav>
       <div class="sidebar-footer">
-        v{{ app.info?.version || "0.4.0" }}
+        v{{ app.info?.version || "1.0.0" }}
       </div>
     </aside>
 

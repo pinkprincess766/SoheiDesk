@@ -82,8 +82,7 @@ pnpm app:dev    # запуск
 pnpm app:build  # сборка установщика
 ```
 
-Сборка под все ОС: Actions → **Build all platforms**  
-Документация: [СБОРКА-ВСЕ-ОС.md](https://github.com/pinkprincess766/SoheiDesk/blob/main/СБОРКА-ВСЕ-ОС.md)
+Сборка под все ОС: Actions → **Build all platforms**
 
 ---
 

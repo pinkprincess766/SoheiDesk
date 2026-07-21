@@ -333,8 +333,6 @@ pnpm app:build    # installer for the current OS only
 Build for macOS + Windows + Linux at once: GitHub Actions  
 `.github/workflows/release.yml` → **Build all platforms**.
 
-Details (Russian): [`СБОРКА-ВСЕ-ОС.md`](./СБОРКА-ВСЕ-ОС.md), [`КАК УСТАНОВИТЬ.md`](./КАК%20УСТАНОВИТЬ.md).
-
 Full user guide in Russian: [`README.ru.md`](./README.ru.md).
 
 ---

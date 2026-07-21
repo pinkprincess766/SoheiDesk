@@ -338,8 +338,6 @@ pnpm app:build    # установщик для текущей ОС
 Сборка сразу под macOS + Windows + Linux: GitHub Actions  
 `.github/workflows/release.yml` → **Build all platforms**.
 
-Подробности: [`СБОРКА-ВСЕ-ОС.md`](./СБОРКА-ВСЕ-ОС.md), [`КАК УСТАНОВИТЬ.md`](./КАК%20УСТАНОВИТЬ.md).
-
 English version: [`README.md`](./README.md).
 
 ---

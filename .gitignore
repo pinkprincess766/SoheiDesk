@@ -52,3 +52,16 @@ secrets*
 
 # Apple Pages originals if reappear
 *.pages
+
+# Local design / planning docs (keep on machine, never publish)
+План разработки.md
+Техническое задание.md
+СБОРКА-ВСЕ-ОС.md
+Архитектура.export.txt
+Техническое задание.pages.export.txt
+*Архитектура*
+*Техническое задание*
+*План разработки*
+*СБОРКА-ВСЕ-ОС*
+docs/private/
+*.export.txt

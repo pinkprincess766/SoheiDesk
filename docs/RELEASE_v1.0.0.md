@@ -1,86 +1,111 @@
-# SoheiDesk 1.0.0
+# 🎉 SoheiDesk 1.0
 
-Первый полноценный релиз приложения для компьютера.
+### Научный ридер и рабочий журнал — как обычная программа на компьютере
 
----
+Не нужно уметь кодить. Не нужно открывать терминал.  
+Скачали → установили → открыли файл.
 
-## 🇷🇺 Для пользователей (простыми словами)
-
-### Что это
-**SoheiDesk** — программа, в которой можно:
-- открывать документы (PDF, Word, текст и др.);
-- делать пометки (выделение, комментарии, рисование на PDF);
-- вести **журнал** (дневник работ) по шаблонам;
-- **экспортировать** отчёты (Markdown, HTML, Typst, LaTeX, Word);
-- искать по своим материалам;
-- при желании — литература (DOI, arXiv…), RSS, Zotero.
-
-**Не нужно** уметь программировать и открывать терминал.
-
-### Как установить
-
-1. Ниже, в блоке **Assets**, скачайте файл **для вашей системы**.
-2. Установите как обычную программу (инструкция в [README.ru.md](https://github.com/pinkprincess766/SoheiDesk/blob/main/README.ru.md)).
-
-| Ваш компьютер | Какой файл |
-|---------------|------------|
-| **Mac** (M1/M2/M3/M4 или Intel) | `SoheiDesk_1.0.0_universal.dmg` (предпочтительно) |
-| **Mac** только Apple Silicon | `SoheiDesk_1.0.0_aarch64.dmg` |
-| **Windows** | `…msi` или `…setup.exe` |
-| **Linux** | `…AppImage` или `…deb` |
-
-### Mac: «неизвестный разработчик»
-Правый клик по SoheiDesk → **Открыть** → снова **Открыть**.  
-Подробно: [README.ru.md](https://github.com/pinkprincess766/SoheiDesk/blob/main/README.ru.md)
-
-### Windows: SmartScreen
-**Подробнее** → **Выполнить в любом случае**.
-
-### С чего начать после установки
-1. Откройте **Ридер** → **Открыть файл…** → выберите PDF.  
-2. Попробуйте **Журнал** → новая запись.  
-3. При необходимости — **Экспорт**.
-
-Полная инструкция: https://github.com/pinkprincess766/SoheiDesk/blob/main/README.ru.md
+<p align="center">
+  <img src="https://raw.githubusercontent.com/pinkprincess766/SoheiDesk/main/assets/brand/app-icon-1024.png" width="120" alt="SoheiDesk" />
+</p>
 
 ---
 
-## 🇬🇧 English (short)
+## 📥 Скачать и установить
 
-**SoheiDesk 1.0** is a desktop app for reading documents, annotations, a lab-style journal, export, and search — **no coding required**.
+Выберите файл **под вашу систему** в блоке **Assets** внизу этой страницы.
 
-1. Download the installer for your OS from **Assets** below.  
-2. Install like any normal app.  
-3. Full guide: [README.md](https://github.com/pinkprincess766/SoheiDesk/blob/main/README.md) · Russian: [README.ru.md](https://github.com/pinkprincess766/SoheiDesk/blob/main/README.ru.md)
+| Компьютер | Что скачать |
+|:----------|:------------|
+| 🍎 **Mac** (чипы M1 / M2 / M3 / M4 **и** Intel) | **`SoheiDesk_1.0.0_universal.dmg`** |
+| 🪟 **Windows** | установщик `.msi` или `.exe` *(если прикреплён к релизу)* |
+| 🐧 **Linux** | `.AppImage` или `.deb` *(если прикреплён к релизу)* |
 
-| OS | File |
-|----|------|
-| Mac (Intel + Apple Silicon) | `SoheiDesk_1.0.0_universal.dmg` |
-| Windows | `.msi` / setup `.exe` |
-| Linux | `.AppImage` / `.deb` |
+### Mac — три шага
+1. Откройте `.dmg` двойным щелчком  
+2. Перетащите **SoheiDesk** в папку **Программы**  
+3. Запустите из **Программ**
+
+> ⚠️ Если Mac пишет *«от неизвестного разработчика»* — это нормально.  
+> **Правый клик** по SoheiDesk → **Открыть** → снова **Открыть**.  
+> Дальше приложение запускается как обычно.
+
+### Windows
+Двойной щелчок по установщику → **Далее** → **Установить**.  
+Если SmartScreen: **Подробнее** → **Выполнить в любом случае**.
+
+📖 **Подробная инструкция с картинками в тексте:**  
+[README на русском](https://github.com/pinkprincess766/SoheiDesk/blob/main/README.ru.md) · [English README](https://github.com/pinkprincess766/SoheiDesk/blob/main/README.md)
 
 ---
 
-## Что внутри 1.0 (кратко)
+## ✨ Что умеет SoheiDesk 1.0
 
-- Ридер: PDF (в т.ч. рисование), MD/TXT/DOCX/EPUB/HTML/TEX  
-- Аннотации отдельно от файлов  
-- Журнал + шаблоны + экспорт отчётов  
-- Поиск по библиотеке  
-- Литература (DOI / arXiv / PubMed), Zotero, RSS  
-- OCR (если установлен Tesseract)  
-- Опционально: LAN share, плагины-парсеры  
+| | Возможность | Зачем это вам |
+|:-|:------------|:--------------|
+| 📄 | **Ридер** | PDF, Word (DOCX), текст, Markdown, HTML, EPUB… |
+| ✏️ | **Пометки** | Выделения, комментарии, рисование на PDF — **без порчи** исходного файла |
+| 📓 | **Журнал** | Дневник работ по готовым или своим шаблонам |
+| 📤 | **Экспорт** | Отчёт в Markdown, HTML, Typst, LaTeX, Word |
+| 🔍 | **Поиск** | Найти текст по библиотеке и журналу |
+| 📚 | **Литература** | DOI, arXiv, PubMed, экспорт списка (BibTeX и др.) |
+| 🔗 | **Zotero / RSS** | Импорт библиотеки и ленты журналов *(по желанию)* |
+
+Работает **в основном без интернета**. Сеть нужна только для DOI, поиска статей и RSS.
 
 ---
 
-## Для разработчиков
+## 🚀 С чего начать за 1 минуту
+
+1. Откройте **Ридер** → **Открыть файл…** → выберите PDF  
+2. Справа попробуйте **выделение** или **комментарий**  
+3. Зайдите в **Журнал** → создайте запись  
+4. При необходимости: **Экспорт** → предпросмотр → сохранить файл  
+
+Готово — вы уже пользуетесь SoheiDesk.
+
+---
+
+## 🔒 Про данные
+
+- Заметки и пометки хранятся **на вашем компьютере**  
+- Исходные PDF/DOCX программа **не перезаписывает** при обычной работе  
+- Регистрация и аккаунт **не нужны**
+
+---
+
+## 🛠 Для разработчиков
 
 ```bash
 pnpm install
-pnpm app:build
+pnpm app:dev    # запуск
+pnpm app:build  # сборка установщика
 ```
 
-CI: Actions → **Build all platforms**  
-Сборка всех ОС: [СБОРКА-ВСЕ-ОС.md](https://github.com/pinkprincess766/SoheiDesk/blob/main/СБОРКА-ВСЕ-ОС.md)
+Сборка под все ОС: Actions → **Build all platforms**  
+Документация: [СБОРКА-ВСЕ-ОС.md](https://github.com/pinkprincess766/SoheiDesk/blob/main/СБОРКА-ВСЕ-ОС.md)
 
-**Commit / tag:** `v1.0.0`
+---
+
+## 🌐 English (short)
+
+**SoheiDesk 1.0** — desktop reader + annotations + lab-style journal + export. No coding required.
+
+1. Download the installer for your OS from **Assets** below  
+2. Install like any normal app  
+3. Open **Reader → Open file…**
+
+| Platform | File |
+|:---------|:-----|
+| **Mac** (Intel + Apple Silicon) | `SoheiDesk_1.0.0_universal.dmg` |
+| **Windows** | `.msi` / setup `.exe` |
+| **Linux** | `.AppImage` / `.deb` |
+
+Full guides: [English](https://github.com/pinkprincess766/SoheiDesk/blob/main/README.md) · [Русский](https://github.com/pinkprincess766/SoheiDesk/blob/main/README.ru.md)
+
+---
+
+<p align="center">
+  <b>SoheiDesk 1.0</b> — откройте документ, сделайте пометку, сохраните мысль.<br/>
+  <sub>Репозиторий: <a href="https://github.com/pinkprincess766/SoheiDesk">pinkprincess766/SoheiDesk</a></sub>
+</p>

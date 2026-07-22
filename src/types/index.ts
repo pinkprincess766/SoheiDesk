@@ -1,4 +1,4 @@
-export type DocType = "pdf" | "md" | "txt" | "docx" | "epub" | "html";
+export type DocType = "pdf" | "md" | "txt" | "docx" | "epub" | "html" | "tex";
 
 export interface AppInfo {
   name: string;
@@ -24,6 +24,10 @@ export interface OpenedDocument {
   content_hash: string;
   file_size: number;
   text: string | null;
+  /** PDF payload from backend (preferred). */
+  binary_base64?: string | null;
+  /** Local cache path for PDF / media root. */
+  cache_path?: string | null;
 }
 
 export interface OpenResult {
@@ -70,7 +74,6 @@ export interface ExportPreview {
   title: string;
 }
 
-/** Reflow: text offsets. PDF: page-space geometry. */
 export interface Annotation {
   id: string;
   document_id: string;
@@ -104,7 +107,6 @@ export interface PdfPoint {
 export interface PdfPosition {
   page: number;
   rects?: PdfRect[];
-  /** freehand stroke in page-space */
   points?: PdfPoint[];
   shape?: "rect" | "ellipse" | "arrow";
 }

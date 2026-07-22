@@ -55,7 +55,10 @@ pub fn list_documents(db: &DbState) -> AppResult<Vec<DocumentRecord>> {
 
 /// Open a user-selected path: compute content_hash, upsert library row, return payload.
 pub fn open_and_register(db: &DbState, path: &Path) -> AppResult<OpenResult> {
-    let opened = parsers::open_document(path)?;
+    // Pre-hash for cache dir (open_document hashes again — cheap for head/tail hash)
+    let (content_hash, _) = documents::content_hash(path)?;
+    let cache_dir = db.data_dir.join("media").join(&content_hash);
+    let opened = parsers::open_document(path, Some(&cache_dir))?;
     let now = Utc::now().to_rfc3339();
     let doc_type = DocType::from_path(path)?;
 

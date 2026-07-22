@@ -399,3 +399,13 @@ a {
   margin: 8px 0;
   text-align: center;
 }
+
+.doc-image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 12px 0;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-sidebar);
+}

@@ -75,6 +75,8 @@ function formatSize(n: number | null | undefined) {
           :path="library.current.opened.path"
           :title="library.current.opened.title"
           :document-id="library.current.document.id"
+          :binary-base64="library.current.opened.binary_base64"
+          :cache-path="library.current.opened.cache_path"
         />
       </div>
       <AnnotationPanel />

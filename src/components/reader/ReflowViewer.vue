@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { renderMarkdown } from "../../utils/markdown";
 import type { Annotation, ReflowPosition } from "../../types";
 import { useAnnotationsStore } from "../../stores/annotations";
@@ -13,10 +14,30 @@ const props = defineProps<{
 const annotations = useAnnotationsStore();
 const contentRef = ref<HTMLElement | null>(null);
 
+/** sohei-file:///abs/path → convertFileSrc URL inside markdown image syntax */
+function resolveMedia(src: string): string {
+  return src.replace(/!\[([^\]]*)\]\(sohei-file:\/\/([^)\n]+)\)/g, (_m, alt, filePath) => {
+    try {
+      let p = String(filePath).trim();
+      try {
+        p = decodeURIComponent(p);
+      } catch {
+        /* keep */
+      }
+      const url = convertFileSrc(p);
+      return `![${alt || "image"}](${url})`;
+    } catch (e) {
+      console.warn("DOCX image path failed", filePath, e);
+      return "\n\n*[image unavailable]*\n\n";
+    }
+  });
+}
+
 const displayHtml = computed(() => {
-  if (props.mode === "md") return renderMarkdown(props.text);
-  // plain text as pre-like paragraphs preserving offsets via data
-  return escapeHtml(props.text).replace(/\n/g, "<br/>");
+  if (props.mode === "md") {
+    return renderMarkdown(resolveMedia(props.text || ""));
+  }
+  return escapeHtml(props.text || "").replace(/\n/g, "<br/>");
 });
 
 function escapeHtml(s: string) {
@@ -35,7 +56,6 @@ function parsePos(a: Annotation): ReflowPosition | null {
   }
 }
 
-/** Map selection offsets within the original plain text for TXT; for MD use rendered text approx. */
 function getSelectionOffsets(): ReflowPosition | null {
   const sel = window.getSelection();
   if (!sel || sel.isCollapsed || !contentRef.value) return null;
@@ -89,14 +109,8 @@ function applyHighlights() {
   const el = contentRef.value;
   if (!el) return;
 
-  // Reset content
-  if (props.mode === "md") {
-    el.innerHTML = displayHtml.value;
-  } else {
-    el.innerHTML = escapeHtml(props.text).replace(/\n/g, "<br/>");
-  }
+  el.innerHTML = displayHtml.value;
 
-  // For TXT we can map offsets on textContent; for MD offsets are on rendered text
   const full = el.textContent || "";
   const marks = annotations.items
     .map((a) => ({ a, pos: parsePos(a) }))
@@ -149,7 +163,6 @@ function wrapRange(root: HTMLElement, start: number, end: number, ann: Annotatio
   try {
     range.surroundContents(mark);
   } catch {
-    // partial nodes — extract contents
     const frag = range.extractContents();
     mark.appendChild(frag);
     range.insertNode(mark);
@@ -188,5 +201,13 @@ onMounted(async () => {
 .reflow-viewer :deep(mark) {
   border-radius: 2px;
   padding: 0 1px;
+}
+.reflow-viewer :deep(.doc-image) {
+  display: block;
+  max-width: min(100%, 720px);
+  height: auto;
+  margin: 16px 0;
+  border-radius: 8px;
+  border: 1px solid var(--border);
 }
 </style>

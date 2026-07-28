@@ -1,11 +1,10 @@
 # Builds SoheiDesk installers for macOS, Windows, and Linux.
 #
-# How to run:
-#   1. Push this repo to GitHub
-#   2. Actions → "Build all platforms" → Run workflow
-#   OR push a tag: git tag v0.4.0 && git push origin v0.4.0
+# Trigger:
+#   - Push tag: git tag v1.1.0 && git push origin v1.1.0
+#   - Or Actions → "Build all platforms" → Run workflow
 #
-# Download: open the finished run → Artifacts → soheidesk-macos / windows / linux
+# Download: finished run → Artifacts → soheidesk-macos / windows / linux
 
 name: Build all platforms
 
@@ -45,7 +44,8 @@ jobs:
         with:
           workspaces: src-tauri -> target
 
-      - run: pnpm install
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Build universal macOS app + dmg
         run: pnpm tauri build --target universal-apple-darwin
@@ -53,8 +53,7 @@ jobs:
       - name: Collect macOS artifacts
         run: |
           mkdir -p dist-artifacts
-          find src-tauri/target -type f \( -name '*.dmg' -o -name '*.app' \) 2>/dev/null | head
-          # Copy dmg and zip the .app
+          find src-tauri/target -type f -name '*.dmg' 2>/dev/null | head -20
           cp -v src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg dist-artifacts/ 2>/dev/null || true
           cp -v src-tauri/target/release/bundle/dmg/*.dmg dist-artifacts/ 2>/dev/null || true
           if [ -d src-tauri/target/universal-apple-darwin/release/bundle/macos/SoheiDesk.app ]; then
@@ -96,7 +95,8 @@ jobs:
         with:
           workspaces: src-tauri -> target
 
-      - run: pnpm install
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Build Windows installers
         run: pnpm tauri build
@@ -150,7 +150,8 @@ jobs:
         with:
           workspaces: src-tauri -> target
 
-      - run: pnpm install
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Build Linux packages
         run: pnpm tauri build

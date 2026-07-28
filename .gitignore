@@ -68,5 +68,12 @@ node_modules/
 *Техническое задание*
 *План разработки*
 *СБОРКА-ВСЕ-ОС*
+*КАК УСТАНОВИТЬ*
 docs/private/
 *.export.txt
+
+# Scratch / Imagine dumps in repo root
+/grok-image-*.jpg
+/5e290c76-*.jpg
+/*.jpg
+!assets/**/*.jpg

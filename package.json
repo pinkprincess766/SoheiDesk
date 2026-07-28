@@ -9,8 +9,11 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "app:dev": "tauri dev",
+    "app:dev:ui": "vite --port 1420 --strictPort",
     "app:build": "tauri build",
-    "app:icons": "tauri icon assets/brand/app-icon-1024.png"
+    "app:build:arm": "tauri build --target aarch64-apple-darwin",
+    "app:icons": "tauri icon assets/brand/app-icon-1024.png",
+    "clean": "bash scripts/clean.sh"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

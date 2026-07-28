@@ -150,10 +150,10 @@ pub fn read_authorized_file(
 fn read_path(path: PathBuf) -> AppResult<FileBytes> {
     let meta = std::fs::metadata(&path)?;
     let size = meta.len();
-    // 80MB hard cap for IPC base64 path
-    if size > 80 * 1024 * 1024 {
+    // 200MB hard cap for IPC base64 (large textbooks / scans)
+    if size > 200 * 1024 * 1024 {
         return Err(AppError::Message(format!(
-            "file too large for in-app load ({:.1} MB). Try a smaller PDF.",
+            "file too large for in-app load ({:.1} MB). Max 200 MB.",
             size as f64 / (1024.0 * 1024.0)
         )));
     }

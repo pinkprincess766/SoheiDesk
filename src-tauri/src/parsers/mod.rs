@@ -1,6 +1,9 @@
+pub mod djvu;
 pub mod docx;
 pub mod epub_parse;
+pub mod fb2;
 pub mod html;
+pub mod pdf_text;
 pub mod text;
 
 use crate::documents::DocType;
@@ -51,6 +54,8 @@ pub fn open_document(path: &Path, cache_dir: Option<&Path>) -> AppResult<OpenedD
         DocType::Docx => Some(docx::extract_text(path, cache_dir)?),
         DocType::Epub => Some(epub_parse::extract_text(path)?),
         DocType::Html => Some(html::extract_text(path)?),
+        DocType::Fb2 => Some(fb2::extract_text(path)?),
+        DocType::Djvu => Some(djvu::extract_text(path)?),
         DocType::Pdf => {
             // Always make a cache copy under app data (asset protocol friendly)
             if let Some(dir) = cache_dir {
@@ -62,12 +67,23 @@ pub fn open_document(path: &Path, cache_dir: Option<&Path>) -> AppResult<OpenedD
                 }
                 cache_path = Some(dest.to_string_lossy().to_string());
             }
-            // Also attach base64 for PDFs under 30MB (stable, no path issues)
-            if file_size > 0 && file_size <= 30 * 1024 * 1024 {
+            // Prefer cache_path + authorized read / asset protocol.
+            // Avoid large base64 in the Vue/Pinia reactive graph (freezes UI on reopen).
+            if cache_path.is_none() && file_size > 0 && file_size <= 2 * 1024 * 1024 {
                 let bytes = std::fs::read(path)?;
                 binary_base64 = Some(B64.encode(bytes));
             }
-            None
+            // Text layer for Simple mode + search (cached as body.txt)
+            match pdf_text::extract_and_cache(path, cache_dir) {
+                Ok(t) => Some(t),
+                Err(e) => {
+                    // Don't fail open — Normal mode can still show pages
+                    Some(format!(
+                        "# {title}\n\n(Не удалось извлечь текст PDF: {e})\n\n\
+                         В Обычном режиме откройте страницы документа.\n"
+                    ))
+                }
+            }
         }
     };
 
@@ -86,7 +102,7 @@ pub fn open_document(path: &Path, cache_dir: Option<&Path>) -> AppResult<OpenedD
 /// Extract searchable text for indexing.
 pub fn extract_search_text(path: &Path, doc_type: &str) -> AppResult<String> {
     match doc_type {
-        "pdf" => Ok(String::new()),
+        "pdf" => pdf_text::extract_text(path).or_else(|_| Ok(String::new())),
         "txt" | "md" | "rtf" | "tex" => text::read_text_file(path),
         "docx" => {
             // index without writing media
@@ -102,6 +118,8 @@ pub fn extract_search_text(path: &Path, doc_type: &str) -> AppResult<String> {
         }
         "epub" => epub_parse::extract_text(path),
         "html" => html::extract_text(path),
+        "fb2" => fb2::extract_text(path),
+        "djvu" => djvu::extract_text(path).or_else(|_| Ok(String::new())),
         _ => {
             if path.is_file() {
                 text::read_text_file(path).or_else(|_| Ok(String::new()))

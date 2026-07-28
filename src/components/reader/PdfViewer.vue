@@ -15,7 +15,6 @@ import type { Annotation, PdfPosition, PdfRect } from "../../types";
 import { useAnnotationsStore } from "../../stores/annotations";
 import { useAppStore } from "../../stores/app";
 
-// Bundled into public/ — works in Tauri webview
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   "/pdf.worker.min.mjs",
   window.location.href,
@@ -32,47 +31,50 @@ const props = defineProps<{
 const annotations = useAnnotationsStore();
 const app = useAppStore();
 
-/** Always-mounted pages root — never gated by v-if / v-show */
 const containerRef = ref<HTMLElement | null>(null);
 const scale = ref(1.15);
 const pageCount = ref(0);
+const currentPage = ref(1);
 const loading = ref(true);
 const rendering = ref(false);
 const error = ref<string | null>(null);
 const status = ref("");
 
-/**
- * pdf.js uses JS private fields (#…). A Vue deep `ref` wraps the object in a Proxy
- * and then getPage/render throw "Cannot read from private field".
- * Keep the document as a plain module-level variable (not reactive).
- */
-let pdfDoc: pdfjs.PDFDocumentProxy | null = null;
+/** Comment modal (window.prompt is blocked in Tauri webview) */
+const commentOpen = ref(false);
+const commentText = ref("");
+let commentResolve: ((v: string | null) => void) | null = null;
 
-/** Ignore stale async results when props change mid-load */
+let pdfDoc: pdfjs.PDFDocumentProxy | null = null;
 let loadGen = 0;
-/** How many pages have been fully rendered into the DOM */
 const renderedUpTo = ref(0);
-/** Batch size for progressive render */
-const BATCH = 4;
-/** First paint: show something fast */
-const FIRST_BATCH = 2;
+/** How many pages around viewport to keep rendered (virtualization) */
+const PAGE_BUFFER = 2;
+/** Placeholder height until measured (CSS px at scale 1.15 ~ A4-ish) */
+const EST_PAGE_HEIGHT = 900;
 
 type PageView = {
   pageNum: number;
   canvas: HTMLCanvasElement;
   overlay: HTMLDivElement;
+  wrap: HTMLDivElement;
   viewport: pdfjs.PageViewport;
   scale: number;
 };
 
-/** shallowRef so we don't deep-proxy canvas/viewport objects */
 const pageViews = shallowRef<PageView[]>([]);
-let dragStart: { pageNum: number; x: number; y: number } | null = null;
+let dragStart: { pageNum: number; x: number; y: number; view: PageView } | null = null;
 let dragRect: PdfRect | null = null;
 let rubberEl: HTMLDivElement | null = null;
 let strokeCss: { x: number; y: number }[] = [];
 let strokeSvg: SVGSVGElement | null = null;
 let renderAbort = false;
+let drawingActive = false;
+let scaleTimer: ReturnType<typeof setTimeout> | null = null;
+/** Separate generation for zoom so we can abort mid-render cleanly */
+let scaleGen = 0;
+/** Scroll ratio 0..1 while re-rendering zoom (more stable than page anchors) */
+let scrollRatio = 0;
 
 const pageAnns = computed(() => {
   const map = new Map<number, Annotation[]>();
@@ -96,11 +98,9 @@ function parsePos(a: Annotation): PdfPosition | null {
 function pageRectToCss(rect: PdfRect, viewport: pdfjs.PageViewport) {
   const [x1, y1] = viewport.convertToViewportPoint(rect.x, rect.y);
   const [x2, y2] = viewport.convertToViewportPoint(rect.x + rect.w, rect.y + rect.h);
-  const left = Math.min(x1, x2);
-  const top = Math.min(y1, y2);
   return {
-    left,
-    top,
+    left: Math.min(x1, x2),
+    top: Math.min(y1, y2),
     width: Math.abs(x2 - x1),
     height: Math.abs(y2 - y1),
   };
@@ -115,11 +115,12 @@ function cssToPageRect(
 ): PdfRect {
   const p1 = viewport.convertToPdfPoint(left, top);
   const p2 = viewport.convertToPdfPoint(left + width, top + height);
-  const x = Math.min(p1[0], p2[0]);
-  const y = Math.min(p1[1], p2[1]);
-  const w = Math.abs(p2[0] - p1[0]);
-  const h = Math.abs(p2[1] - p1[1]);
-  return { x, y, w, h };
+  return {
+    x: Math.min(p1[0], p2[0]),
+    y: Math.min(p1[1], p2[1]),
+    w: Math.abs(p2[0] - p1[0]),
+    h: Math.abs(p2[1] - p1[1]),
+  };
 }
 
 function b64ToBytes(b64: string): Uint8Array {
@@ -130,15 +131,10 @@ function b64ToBytes(b64: string): Uint8Array {
 }
 
 async function loadPdfBytes(): Promise<Uint8Array> {
-  if (props.binaryBase64 && props.binaryBase64.length > 100) {
-    status.value = "loading embedded PDF…";
-    return b64ToBytes(props.binaryBase64);
-  }
-
   const tryPaths = [props.cachePath, props.path].filter(Boolean) as string[];
   for (const p of tryPaths) {
     try {
-      status.value = `asset: ${p.slice(0, 40)}…`;
+      status.value = `asset: ${p.slice(0, 48)}…`;
       const url = convertFileSrc(p);
       const res = await fetch(url);
       if (res.ok) {
@@ -155,53 +151,76 @@ async function loadPdfBytes(): Promise<Uint8Array> {
     }
   }
 
-  status.value = "reading via backend…";
-  const file = await invoke<{ base64: string; size: number }>("read_authorized_file", {
-    path: props.cachePath || props.path,
-    documentId: props.documentId,
-  });
-  return b64ToBytes(file.base64);
+  let lastErr: unknown = null;
+  for (const p of tryPaths) {
+    try {
+      status.value = `backend: ${p.slice(0, 48)}…`;
+      const file = await invoke<{ base64: string; size: number }>("read_authorized_file", {
+        path: p,
+        documentId: props.documentId,
+      });
+      if (file.base64 && file.base64.length > 100) return b64ToBytes(file.base64);
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+
+  if (props.binaryBase64 && props.binaryBase64.length > 100) {
+    status.value = "loading embedded PDF…";
+    return b64ToBytes(props.binaryBase64);
+  }
+
+  throw new Error(
+    lastErr ? `не удалось прочитать PDF (${String(lastErr)})` : "не удалось прочитать PDF",
+  );
 }
 
-/** Resolve the pages container — always in the template, so this is a safety net only. */
 function getContainer(): HTMLElement {
   const el = containerRef.value;
-  if (!el) {
-    throw new Error(
-      "PDF container missing (internal). Перезапустите app:dev и нажмите «Перезагрузить».",
-    );
-  }
+  if (!el) throw new Error("PDF container missing — reload the document.");
   return el;
 }
 
 async function loadPdf() {
+  renderAbort = true;
   const gen = ++loadGen;
-  renderAbort = true; // cancel any in-flight progressive render
+  scaleGen = gen;
   loading.value = true;
   rendering.value = false;
   error.value = null;
   status.value = "starting…";
   pageCount.value = 0;
+  currentPage.value = 1;
   renderedUpTo.value = 0;
+  cleanupDrag(true);
   destroyPages();
 
   try {
     const bytes = await loadPdfBytes();
     if (gen !== loadGen) return;
-    if (bytes.byteLength < 5) {
-      throw new Error("PDF data is empty");
-    }
+    if (bytes.byteLength < 5) throw new Error("PDF data is empty");
     status.value = `parsing ${Math.round(bytes.byteLength / 1024)} KB…`;
 
-    // Fresh buffer (pdf.js prefers non-shared / transferable-friendly data)
     const copy = Uint8Array.from(bytes);
-
+    const ab = copy.buffer.slice(copy.byteOffset, copy.byteOffset + copy.byteLength);
     const task = pdfjs.getDocument({
-      data: copy,
+      data: new Uint8Array(ab),
       useSystemFonts: true,
       disableStream: true,
+      disableRange: true,
+      disableAutoFetch: true,
+      stopAtErrors: false,
     });
-    const doc = await task.promise;
+    let doc;
+    try {
+      doc = await task.promise;
+    } catch (pe) {
+      const msg = pe instanceof Error ? pe.message : String(pe);
+      if (/password|encrypted/i.test(msg)) {
+        throw new Error("PDF защищён паролем — SoheiDesk пока не открывает encrypted PDF");
+      }
+      throw new Error(`pdf.js: ${msg}`);
+    }
     if (gen !== loadGen) {
       try {
         (doc as { destroy?: () => void }).destroy?.();
@@ -211,36 +230,22 @@ async function loadPdf() {
       return;
     }
 
-    // Drop previous doc
-    try {
-      const prev = pdfDoc as unknown as { destroy?: () => void; cleanup?: () => void } | null;
-      prev?.cleanup?.();
-      prev?.destroy?.();
-    } catch {
-      /* */
-    }
-
-    // markRaw: belt-and-suspenders if anything reactive ever touches this
+    destroyPdfDoc();
     pdfDoc = markRaw(doc) as unknown as pdfjs.PDFDocumentProxy;
     pageCount.value = doc.numPages;
-    status.value = `${doc.numPages} page(s) — preparing view…`;
+    status.value = `${doc.numPages} page(s)`;
 
-    // Show the stage immediately (container is always mounted)
     loading.value = false;
     error.value = null;
     await nextTick();
-
-    // One more frame so layout is applied (flex min-height etc.)
     await new Promise<void>((r) => requestAnimationFrame(() => r()));
     if (gen !== loadGen) return;
 
-    getContainer(); // assert early with a clear message
-
+    getContainer();
     renderAbort = false;
     rendering.value = true;
     status.value = "rendering…";
-
-    await renderPagesProgressive(gen);
+    await renderPagesProgressive(gen, "load");
     if (gen !== loadGen) return;
 
     await annotations.load(props.documentId);
@@ -248,11 +253,20 @@ async function loadPdf() {
 
     rendering.value = false;
     status.value = "";
+    const root = containerRef.value;
+    if (root) {
+      root.style.overflow = "auto";
+      root.style.pointerEvents = "auto";
+      root.style.minHeight = "";
+    }
+    // ensure scroll listener is attached after container is live
+    root?.removeEventListener("scroll", onScroll);
+    root?.addEventListener("scroll", onScroll, { passive: true });
+    updateCurrentPageFromScroll();
   } catch (e) {
     if (gen !== loadGen) return;
     console.error("PDF load error", e);
-    const msg = e instanceof Error ? e.message : String(e);
-    error.value = `Не удалось открыть PDF: ${msg}`;
+    error.value = `Не удалось открыть PDF: ${e instanceof Error ? e.message : String(e)}`;
     app.setError(error.value);
     loading.value = false;
     rendering.value = false;
@@ -263,11 +277,6 @@ function destroyPages() {
   const root = containerRef.value;
   if (root) root.innerHTML = "";
   pageViews.value = [];
-  dragStart = null;
-  dragRect = null;
-  rubberEl = null;
-  strokeCss = [];
-  strokeSvg = null;
   renderedUpTo.value = 0;
 }
 
@@ -282,10 +291,52 @@ function destroyPdfDoc() {
   pdfDoc = null;
 }
 
+function captureScrollRatio() {
+  const root = containerRef.value;
+  if (!root) {
+    scrollRatio = 0;
+    return;
+  }
+  const max = Math.max(1, root.scrollHeight - root.clientHeight);
+  scrollRatio = Math.min(1, Math.max(0, root.scrollTop / max));
+}
+
+function restoreScrollRatio() {
+  const root = containerRef.value;
+  if (!root) return;
+  // Wait a frame so layout has new page heights
+  requestAnimationFrame(() => {
+    const max = Math.max(0, root.scrollHeight - root.clientHeight);
+    root.scrollTop = scrollRatio * max;
+    // Ensure overflow scroll still works after DOM rebuild
+    root.style.overflow = "auto";
+    root.style.pointerEvents = "auto";
+    updateCurrentPageFromScroll();
+  });
+}
+
+function updateCurrentPageFromScroll() {
+  const root = containerRef.value;
+  if (!root || pageSlots.length === 0) return;
+  const mid = root.scrollTop + 40;
+  let page = 1;
+  let y = 0;
+  for (const s of pageSlots) {
+    const h = s.el.offsetHeight || s.height;
+    if (y + h > mid) {
+      page = s.pageNum;
+      break;
+    }
+    page = s.pageNum;
+    y += h + 16;
+  }
+  currentPage.value = page;
+}
+
 async function renderPage(
   doc: { getPage: (n: number) => Promise<pdfjs.PDFPageProxy> },
   i: number,
-): Promise<{ view: PageView; wrap: HTMLDivElement }> {
+): Promise<PageView> {
   const page = await doc.getPage(i);
   const viewport = page.getViewport({ scale: scale.value });
   const wrap = document.createElement("div");
@@ -318,9 +369,7 @@ async function renderPage(
 
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("2d context failed");
-  if (outputScale !== 1) {
-    ctx.setTransform(outputScale, 0, 0, outputScale, 0, 0);
-  }
+  if (outputScale !== 1) ctx.setTransform(outputScale, 0, 0, outputScale, 0, 0);
 
   await page
     .render({
@@ -334,87 +383,176 @@ async function renderPage(
     pageNum: i,
     canvas,
     overlay,
+    wrap,
     viewport: markRaw(viewport),
     scale: scale.value,
   };
 
   overlay.addEventListener("mousedown", (ev) => onOverlayDown(ev, view));
-  overlay.addEventListener("mousemove", (ev) => onOverlayMove(ev, view));
-  overlay.addEventListener("mouseup", (ev) => onOverlayUp(ev, view));
   paintOverlay(view);
-  return { view, wrap };
+  return view;
 }
 
-/**
- * Render pages in batches so the first page appears quickly and the UI stays responsive
- * on 600+ page textbooks.
- */
-async function renderPagesProgressive(gen: number) {
+/** Slot per page: placeholder or live canvas */
+type PageSlot = {
+  pageNum: number;
+  el: HTMLDivElement;
+  view: PageView | null;
+  height: number;
+};
+
+let pageSlots: PageSlot[] = [];
+let syncingViewport = false;
+
+function isRenderCurrent(gen: number) {
+  return !renderAbort && gen === loadGen && gen === scaleGen;
+}
+
+/** Build empty page shells (cheap) — only nearby pages get canvas. */
+async function setupVirtualPages(gen: number) {
   const doc = pdfDoc;
   const root = getContainer();
   if (!doc) throw new Error("PDF document not loaded");
 
   root.innerHTML = "";
-  const views: PageView[] = [];
+  root.style.overflow = "auto";
+  root.style.pointerEvents = "auto";
+  pageSlots = [];
+  pageViews.value = [];
+
   const total = doc.numPages;
-  let i = 1;
+  const est = Math.round(EST_PAGE_HEIGHT * (scale.value / 1.15));
 
-  // First batch — paint ASAP
-  const firstEnd = Math.min(FIRST_BATCH, total);
-  for (; i <= firstEnd; i++) {
-    if (renderAbort || gen !== loadGen) return;
-    const { view, wrap } = await renderPage(doc, i);
-    views.push(view);
-    root.appendChild(wrap);
+  for (let i = 1; i <= total; i++) {
+    if (!isRenderCurrent(gen)) return;
+    const el = document.createElement("div");
+    el.className = "pdf-page-slot";
+    el.dataset.page = String(i);
+    el.style.minHeight = `${est}px`;
+    el.style.margin = "0 auto 16px";
+    el.style.width = "fit-content";
+    el.style.maxWidth = "100%";
+    root.appendChild(el);
+    pageSlots.push({ pageNum: i, el, view: null, height: est });
   }
-  pageViews.value = views.slice();
-  renderedUpTo.value = firstEnd;
-  status.value = total > firstEnd ? `стр. ${firstEnd}/${total}…` : "";
-
-  // Yield so Vue paints the first pages
-  await new Promise<void>((r) => requestAnimationFrame(() => r()));
-
-  // Remaining pages in batches
-  while (i <= total) {
-    if (renderAbort || gen !== loadGen) return;
-    const batchEnd = Math.min(i + BATCH - 1, total);
-    for (; i <= batchEnd; i++) {
-      if (renderAbort || gen !== loadGen) return;
-      const { view, wrap } = await renderPage(doc, i);
-      views.push(view);
-      root.appendChild(wrap);
-    }
-    pageViews.value = views.slice();
-    renderedUpTo.value = batchEnd;
-    status.value = batchEnd < total ? `стр. ${batchEnd}/${total}` : "";
-    // Let the browser breathe between batches
-    await new Promise<void>((r) => requestAnimationFrame(() => r()));
-  }
-
-  pageViews.value = views;
   renderedUpTo.value = total;
+  pageCount.value = total;
+
+  root.removeEventListener("scroll", onVirtualScroll);
+  root.addEventListener("scroll", onVirtualScroll, { passive: true });
+  await syncVisiblePages(gen);
+}
+
+function onVirtualScroll() {
+  updateCurrentPageFromScroll();
+  if (syncingViewport || !pdfDoc) return;
+  // debounce mount work
+  window.requestAnimationFrame(() => {
+    void syncVisiblePages(loadGen);
+  });
+}
+
+function visibleRange(root: HTMLElement): [number, number] {
+  const top = root.scrollTop;
+  const bottom = top + root.clientHeight;
+  let start = 1;
+  let end = pageSlots.length || 1;
+  let y = 0;
+  for (const s of pageSlots) {
+    const h = s.el.offsetHeight || s.height;
+    const slotBottom = y + h + 16;
+    if (slotBottom >= top - 100 && start === 1 && y <= top) {
+      start = s.pageNum;
+    }
+    if (y <= bottom + 100) end = s.pageNum;
+    y = slotBottom;
+  }
+  start = Math.max(1, start - PAGE_BUFFER);
+  end = Math.min(pageSlots.length, end + PAGE_BUFFER);
+  return [start, end];
+}
+
+async function syncVisiblePages(gen: number) {
+  const doc = pdfDoc;
+  const root = containerRef.value;
+  if (!doc || !root || !isRenderCurrent(gen)) return;
+  if (syncingViewport) return;
+  syncingViewport = true;
+  try {
+    const [start, end] = visibleRange(root);
+    // Unmount far pages (free canvas memory)
+    for (const s of pageSlots) {
+      if (!isRenderCurrent(gen)) return;
+      if (s.view && (s.pageNum < start || s.pageNum > end)) {
+        s.el.innerHTML = "";
+        s.height = s.el.offsetHeight || s.height;
+        s.el.style.minHeight = `${s.height}px`;
+        s.view = null;
+      }
+    }
+    // Mount visible
+    const views: PageView[] = [];
+    for (const s of pageSlots) {
+      if (!isRenderCurrent(gen)) return;
+      if (s.pageNum < start || s.pageNum > end) continue;
+      if (!s.view) {
+        const view = await renderPage(doc, s.pageNum);
+        if (!isRenderCurrent(gen)) return;
+        s.el.innerHTML = "";
+        s.el.appendChild(view.wrap);
+        s.el.style.minHeight = "";
+        s.view = view;
+        s.height = view.wrap.offsetHeight || s.height;
+      }
+      if (s.view) views.push(s.view);
+    }
+    pageViews.value = views;
+    renderedUpTo.value = end;
+  } finally {
+    syncingViewport = false;
+  }
+}
+
+async function renderPagesProgressive(gen: number, _kind: "load" | "scale" = "load") {
+  scaleGen = gen;
+  await setupVirtualPages(gen);
   status.value = "";
 }
 
-async function renderAllPages() {
-  // Full re-render (e.g. zoom change)
-  const gen = loadGen;
+async function renderAllPagesPreservingScroll() {
+  if (!pdfDoc || loading.value) return;
+
+  renderAbort = true;
+  const gen = ++scaleGen;
+  loadGen = gen;
   renderAbort = false;
+
+  captureScrollRatio();
   rendering.value = true;
+  status.value = "zoom…";
   try {
-    await renderPagesProgressive(gen);
+    await setupVirtualPages(gen);
+    if (gen === scaleGen) restoreScrollRatio();
   } finally {
-    if (gen === loadGen) rendering.value = false;
+    if (gen === scaleGen) {
+      rendering.value = false;
+      status.value = "";
+      const root = containerRef.value;
+      if (root) {
+        root.style.overflow = "auto";
+        root.style.pointerEvents = "auto";
+      }
+    }
   }
 }
 
 function paintOverlay(view: PageView) {
+  if (drawingActive && dragStart?.pageNum === view.pageNum) {
+    // Don't wipe in-progress rubber/stroke
+    return;
+  }
   const overlay = view.overlay;
-  const existingRubber = rubberEl && overlay.contains(rubberEl) ? rubberEl : null;
-  const existingStroke = strokeSvg && overlay.contains(strokeSvg) ? strokeSvg : null;
   overlay.innerHTML = "";
-  if (existingRubber) overlay.appendChild(existingRubber);
-  if (existingStroke) overlay.appendChild(existingStroke);
 
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("width", String(view.viewport.width));
@@ -441,23 +579,28 @@ function paintOverlay(view: PageView) {
       path.setAttribute("d", d);
       path.setAttribute("fill", "none");
       path.setAttribute("stroke", color);
-      path.setAttribute("stroke-width", "2");
+      path.setAttribute("stroke-width", "2.5");
       path.setAttribute("stroke-linecap", "round");
+      path.setAttribute("stroke-linejoin", "round");
       svg.appendChild(path);
       continue;
     }
 
     for (const rect of pos.rects || []) {
       const css = pageRectToCss(rect, view.viewport);
+      if (css.width < 0.5 || css.height < 0.5) continue;
+
       if (a.ann_type === "ellipse" || pos.shape === "ellipse") {
         const el = document.createElementNS("http://www.w3.org/2000/svg", "ellipse");
         el.setAttribute("cx", String(css.left + css.width / 2));
         el.setAttribute("cy", String(css.top + css.height / 2));
-        el.setAttribute("rx", String(css.width / 2));
-        el.setAttribute("ry", String(css.height / 2));
-        el.setAttribute("fill", "none");
+        el.setAttribute("rx", String(Math.max(1, css.width / 2)));
+        el.setAttribute("ry", String(Math.max(1, css.height / 2)));
+        el.setAttribute("fill", color);
+        el.setAttribute("fill-opacity", "0.12");
         el.setAttribute("stroke", color);
         el.setAttribute("stroke-width", "2");
+        el.setAttribute("stroke-dasharray", a.ann_type === "ellipse" ? "4 3" : "0");
         svg.appendChild(el);
       } else if (a.ann_type === "arrow" || pos.shape === "arrow") {
         const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
@@ -466,7 +609,8 @@ function paintOverlay(view: PageView) {
         line.setAttribute("x2", String(css.left + css.width));
         line.setAttribute("y2", String(css.top));
         line.setAttribute("stroke", color);
-        line.setAttribute("stroke-width", "2");
+        line.setAttribute("stroke-width", "2.5");
+        line.setAttribute("marker-end", "url(#sohei-arrow)");
         svg.appendChild(line);
       } else if (a.ann_type === "rect" || pos.shape === "rect") {
         const el = document.createElementNS("http://www.w3.org/2000/svg", "rect");
@@ -478,7 +622,26 @@ function paintOverlay(view: PageView) {
         el.setAttribute("stroke", color);
         el.setAttribute("stroke-width", "2");
         svg.appendChild(el);
+      } else if (a.ann_type === "comment") {
+        const el = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        el.setAttribute("x", String(css.left));
+        el.setAttribute("y", String(css.top));
+        el.setAttribute("width", String(css.width));
+        el.setAttribute("height", String(css.height));
+        el.setAttribute("fill", color);
+        el.setAttribute("fill-opacity", "0.2");
+        el.setAttribute("stroke", color);
+        el.setAttribute("stroke-width", "1.5");
+        svg.appendChild(el);
+        // pin
+        const pin = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        pin.setAttribute("cx", String(css.left + 8));
+        pin.setAttribute("cy", String(css.top + 8));
+        pin.setAttribute("r", "7");
+        pin.setAttribute("fill", color);
+        svg.appendChild(pin);
       } else {
+        // highlight
         const el = document.createElement("div");
         el.style.position = "absolute";
         el.style.left = `${css.left}px`;
@@ -486,9 +649,10 @@ function paintOverlay(view: PageView) {
         el.style.width = `${css.width}px`;
         el.style.height = `${css.height}px`;
         el.style.background = color;
-        el.style.opacity = "0.35";
+        el.style.opacity = "0.4";
+        el.style.mixBlendMode = "multiply";
         el.style.pointerEvents = "none";
-        el.title = a.content || a.ann_type;
+        el.title = a.content || "highlight";
         overlay.appendChild(el);
       }
     }
@@ -497,7 +661,13 @@ function paintOverlay(view: PageView) {
 }
 
 function paintAllOverlays() {
+  if (drawingActive) return;
   for (const v of pageViews.value) paintOverlay(v);
+}
+
+function updateOverlayCursors() {
+  const cur = annotations.mode === "none" ? "default" : "crosshair";
+  for (const v of pageViews.value) v.overlay.style.cursor = cur;
 }
 
 function localXY(ev: MouseEvent, overlay: HTMLDivElement) {
@@ -505,12 +675,53 @@ function localXY(ev: MouseEvent, overlay: HTMLDivElement) {
   return { x: ev.clientX - r.left, y: ev.clientY - r.top };
 }
 
+function askComment(): Promise<string | null> {
+  commentText.value = "";
+  commentOpen.value = true;
+  return new Promise((resolve) => {
+    commentResolve = resolve;
+  });
+}
+
+function submitComment() {
+  const t = commentText.value.trim();
+  commentOpen.value = false;
+  commentResolve?.(t || null);
+  commentResolve = null;
+}
+
+function cancelComment() {
+  commentOpen.value = false;
+  commentResolve?.(null);
+  commentResolve = null;
+}
+
+function cleanupDrag(removeDom: boolean) {
+  if (removeDom) {
+    if (rubberEl?.parentElement) rubberEl.parentElement.removeChild(rubberEl);
+    if (strokeSvg?.parentElement) strokeSvg.parentElement.removeChild(strokeSvg);
+  }
+  rubberEl = null;
+  strokeSvg = null;
+  strokeCss = [];
+  dragStart = null;
+  dragRect = null;
+  drawingActive = false;
+  window.removeEventListener("mousemove", onWindowMove);
+  window.removeEventListener("mouseup", onWindowUp);
+}
+
 function onOverlayDown(ev: MouseEvent, view: PageView) {
   if (annotations.mode === "none" || ev.button !== 0) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+
+  cleanupDrag(true);
+  drawingActive = true;
+
   const { x, y } = localXY(ev, view.overlay);
-  dragStart = { pageNum: view.pageNum, x, y };
+  dragStart = { pageNum: view.pageNum, x, y, view };
   dragRect = null;
-  strokeCss = [];
 
   if (annotations.mode === "drawing") {
     strokeCss = [{ x, y }];
@@ -522,20 +733,33 @@ function onOverlayDown(ev: MouseEvent, view: PageView) {
     strokeSvg.style.top = "0";
     strokeSvg.style.pointerEvents = "none";
     view.overlay.appendChild(strokeSvg);
-    return;
+  } else {
+    rubberEl = document.createElement("div");
+    rubberEl.style.position = "absolute";
+    rubberEl.style.left = `${x}px`;
+    rubberEl.style.top = `${y}px`;
+    rubberEl.style.width = "0";
+    rubberEl.style.height = "0";
+    rubberEl.style.border = "1.5px dashed var(--accent)";
+    rubberEl.style.background = "color-mix(in srgb, var(--accent) 18%, transparent)";
+    rubberEl.style.pointerEvents = "none";
+    rubberEl.style.zIndex = "5";
+    if (annotations.mode === "ellipse") rubberEl.style.borderRadius = "50%";
+    if (annotations.mode === "highlight") {
+      rubberEl.style.border = "none";
+      rubberEl.style.background = annotations.activeColor;
+      rubberEl.style.opacity = "0.35";
+    }
+    view.overlay.appendChild(rubberEl);
   }
 
-  rubberEl = document.createElement("div");
-  rubberEl.style.position = "absolute";
-  rubberEl.style.border = "1px dashed var(--accent)";
-  rubberEl.style.background = "color-mix(in srgb, var(--accent) 20%, transparent)";
-  rubberEl.style.pointerEvents = "none";
-  if (annotations.mode === "ellipse") rubberEl.style.borderRadius = "50%";
-  view.overlay.appendChild(rubberEl);
+  window.addEventListener("mousemove", onWindowMove);
+  window.addEventListener("mouseup", onWindowUp);
 }
 
-function onOverlayMove(ev: MouseEvent, view: PageView) {
-  if (!dragStart || dragStart.pageNum !== view.pageNum) return;
+function onWindowMove(ev: MouseEvent) {
+  if (!dragStart) return;
+  const view = dragStart.view;
   const { x, y } = localXY(ev, view.overlay);
 
   if (annotations.mode === "drawing" && strokeSvg) {
@@ -548,7 +772,7 @@ function onOverlayMove(ev: MouseEvent, view: PageView) {
     );
     path.setAttribute("fill", "none");
     path.setAttribute("stroke", annotations.activeColor);
-    path.setAttribute("stroke-width", "2");
+    path.setAttribute("stroke-width", "2.5");
     path.setAttribute("stroke-linecap", "round");
     strokeSvg.appendChild(path);
     return;
@@ -566,42 +790,67 @@ function onOverlayMove(ev: MouseEvent, view: PageView) {
   dragRect = cssToPageRect(left, top, width, height, view.viewport);
 }
 
-async function onOverlayUp(_ev: MouseEvent, view: PageView) {
-  if (!dragStart || dragStart.pageNum !== view.pageNum) return;
+async function onWindowUp(_ev: MouseEvent) {
+  if (!dragStart) {
+    cleanupDrag(true);
+    return;
+  }
+  const view = dragStart.view;
   const mode = annotations.mode;
+  const rect = dragRect;
+  const pts = strokeCss.slice();
+
+  // detach window listeners first
+  window.removeEventListener("mousemove", onWindowMove);
+  window.removeEventListener("mouseup", onWindowUp);
+
+  if (rubberEl?.parentElement) rubberEl.parentElement.removeChild(rubberEl);
+  if (strokeSvg?.parentElement) strokeSvg.parentElement.removeChild(strokeSvg);
+  rubberEl = null;
+  strokeSvg = null;
   dragStart = null;
+  dragRect = null;
+  strokeCss = [];
+  drawingActive = false;
+
+  if (mode === "none") return;
 
   if (mode === "drawing") {
-    const pts = strokeCss.map((p) => {
+    if (pts.length < 2) return;
+    const pdfPts = pts.map((p) => {
       const [px, py] = view.viewport.convertToPdfPoint(p.x, p.y);
       return { x: px, y: py };
     });
-    if (strokeSvg?.parentElement) strokeSvg.parentElement.removeChild(strokeSvg);
-    strokeSvg = null;
-    strokeCss = [];
-    if (pts.length < 2) return;
     await annotations.create({
       document_id: props.documentId,
       ann_type: "drawing",
       page: view.pageNum,
-      position_json: JSON.stringify({ page: view.pageNum, points: pts }),
-      content: null,
+      position_json: JSON.stringify({ page: view.pageNum, points: pdfPts }),
+      content: "рисунок",
       color: annotations.activeColor,
     });
     paintAllOverlays();
     return;
   }
 
-  const rect = dragRect;
-  if (rubberEl?.parentElement) rubberEl.parentElement.removeChild(rubberEl);
-  rubberEl = null;
-  dragRect = null;
-  if (!rect || rect.w < 2 || rect.h < 2) return;
+  if (!rect || rect.w < 1 || rect.h < 1) return;
 
   let content: string | null = null;
   if (mode === "comment") {
-    content = window.prompt("Комментарий:") || "";
-    if (!content.trim()) return;
+    content = await askComment();
+    if (!content) return;
+  } else if (mode === "highlight") {
+    content = await tryExtractText(view.pageNum, rect);
+    if (!content) content = "выделение";
+  } else {
+    content =
+      mode === "ellipse"
+        ? "овал"
+        : mode === "rect"
+          ? "прямоугольник"
+          : mode === "arrow"
+            ? "стрелка"
+            : mode;
   }
 
   const shape =
@@ -621,31 +870,76 @@ async function onOverlayUp(_ev: MouseEvent, view: PageView) {
   paintAllOverlays();
 }
 
+async function tryExtractText(pageNum: number, rect: PdfRect): Promise<string | null> {
+  if (!pdfDoc) return null;
+  try {
+    const page = await pdfDoc.getPage(pageNum);
+    const content = await page.getTextContent();
+    const parts: string[] = [];
+    for (const item of content.items as { str?: string; transform?: number[]; width?: number }[]) {
+      if (!item.str || !item.transform) continue;
+      const x = item.transform[4];
+      const y = item.transform[5];
+      // rough hit-test in PDF space
+      if (
+        x >= rect.x - 2 &&
+        x <= rect.x + rect.w + 2 &&
+        y >= rect.y - 2 &&
+        y <= rect.y + rect.h + 20
+      ) {
+        parts.push(item.str);
+      }
+    }
+    const t = parts.join(" ").replace(/\s+/g, " ").trim();
+    return t ? t.slice(0, 200) : null;
+  } catch {
+    return null;
+  }
+}
+
+function bumpScale(delta: number) {
+  const next = Math.min(3, Math.max(0.5, +(scale.value + delta).toFixed(2)));
+  scale.value = next;
+}
+
 watch(() => annotations.items, () => paintAllOverlays(), { deep: true });
+watch(() => annotations.mode, () => updateOverlayCursors());
+
 watch(
   () => [props.path, props.documentId, props.cachePath] as const,
   () => {
     void loadPdf();
   },
 );
-// binaryBase64 is huge — only re-trigger when presence flips, not on every reactive touch
-watch(
-  () => (props.binaryBase64 ? props.binaryBase64.length : 0),
-  (len, prev) => {
-    if (len !== prev) void loadPdf();
-  },
-);
-watch(scale, async () => {
-  if (pdfDoc && !loading.value) await renderAllPages();
+
+watch(scale, () => {
+  if (!pdfDoc || loading.value) return;
+  if (scaleTimer) clearTimeout(scaleTimer);
+  // Longer debounce — avoid “вечная пересборка” while clicking +/−
+  scaleTimer = setTimeout(() => {
+    void renderAllPagesPreservingScroll();
+  }, 280);
 });
 
+function onScroll() {
+  updateCurrentPageFromScroll();
+}
+
 onMounted(() => {
-  // Container is in the template from the first paint — ref should be set after mount.
   void loadPdf();
+  // Bind scroll after first paint (ref may be null in onMounted before stage shows)
+  nextTick(() => {
+    containerRef.value?.addEventListener("scroll", onScroll, { passive: true });
+  });
 });
+
 onBeforeUnmount(() => {
   loadGen++;
+  scaleGen++;
   renderAbort = true;
+  if (scaleTimer) clearTimeout(scaleTimer);
+  cleanupDrag(true);
+  containerRef.value?.removeEventListener("scroll", onScroll);
   destroyPages();
   destroyPdfDoc();
 });
@@ -654,24 +948,19 @@ onBeforeUnmount(() => {
 <template>
   <div class="pdf-viewer">
     <div class="pdf-toolbar">
-      <button class="btn" :disabled="scale <= 0.5" @click="scale = Math.max(0.5, +(scale - 0.15).toFixed(2))">
-        −
-      </button>
+      <button class="btn" :disabled="scale <= 0.5 || rendering" @click="bumpScale(-0.15)">−</button>
       <span class="muted">{{ Math.round(scale * 100) }}%</span>
-      <button class="btn" :disabled="scale >= 3" @click="scale = Math.min(3, +(scale + 0.15).toFixed(2))">
-        +
-      </button>
-      <span class="muted">
-        {{ pageCount ? `${renderedUpTo || 0}/${pageCount} стр.` : "—" }}
+      <button class="btn" :disabled="scale >= 3 || rendering" @click="bumpScale(0.15)">+</button>
+      <span class="muted page-stable">
+        <template v-if="pageCount">
+          стр. {{ currentPage }} / {{ pageCount }}
+        </template>
+        <template v-else>—</template>
       </span>
-      <span v-if="rendering && status" class="muted" style="font-size: 0.85rem">{{ status }}</span>
-      <button class="btn" :disabled="loading" @click="loadPdf">Перезагрузить</button>
+      <span v-if="rendering" class="muted" style="font-size: 0.8rem">{{ status || "…" }}</span>
+      <button class="btn" :disabled="loading || rendering" @click="loadPdf">Reload</button>
     </div>
 
-    <!--
-      Stage always contains the pages container (ref never unmounted).
-      Loading / error are overlays — this fixes "PDF container not ready".
-    -->
     <div class="pdf-stage">
       <div ref="containerRef" class="pdf-pages" />
 
@@ -688,6 +977,25 @@ onBeforeUnmount(() => {
           <p class="muted" style="font-size: 0.8rem; margin-top: 12px; word-break: break-all">
             path: {{ path }}
           </p>
+        </div>
+      </div>
+
+      <!-- Comment modal (prompt is blocked in Tauri) -->
+      <div v-if="commentOpen" class="comment-modal" @keydown.esc="cancelComment">
+        <div class="comment-card">
+          <h3>Комментарий</h3>
+          <textarea
+            v-model="commentText"
+            rows="4"
+            placeholder="Текст заметки…"
+            autofocus
+            @keydown.meta.enter="submitComment"
+            @keydown.ctrl.enter="submitComment"
+          />
+          <div class="toolbar" style="justify-content: flex-end; margin-top: 10px">
+            <button class="btn" @click="cancelComment">Отмена</button>
+            <button class="btn btn-primary" @click="submitComment">Сохранить</button>
+          </div>
         </div>
       </div>
     </div>
@@ -709,6 +1017,10 @@ onBeforeUnmount(() => {
   border-bottom: 1px solid var(--border);
   background: var(--bg-elevated);
   flex-wrap: wrap;
+}
+.page-stable {
+  font-variant-numeric: tabular-nums;
+  min-width: 7.5rem;
 }
 .pdf-stage {
   position: relative;
@@ -733,5 +1045,31 @@ onBeforeUnmount(() => {
   text-align: center;
   background: color-mix(in srgb, var(--bg) 92%, transparent);
   z-index: 2;
+}
+.comment-modal {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.45);
+  padding: 20px;
+}
+.comment-card {
+  width: min(420px, 100%);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  box-shadow: var(--shadow);
+}
+.comment-card h3 {
+  margin: 0 0 10px;
+  font-size: 1rem;
+}
+.comment-card textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 90px;
 }
 </style>

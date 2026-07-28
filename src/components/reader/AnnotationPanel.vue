@@ -20,6 +20,23 @@ const modes = [
   { id: "arrow", label: "Стрелка" },
 ] as const;
 
+const typeLabel: Record<string, string> = {
+  highlight: "Выделение",
+  comment: "Коммент",
+  drawing: "Перо",
+  rect: "Прямоуг.",
+  ellipse: "Овал",
+  arrow: "Стрелка",
+};
+
+function labelFor(a: { ann_type: string; content: string | null }) {
+  const body = (a.content || "").trim();
+  if (body && body !== "выделение" && body !== "овал" && body !== "прямоугольник" && body !== "стрелка" && body !== "рисунок") {
+    return body;
+  }
+  return typeLabel[a.ann_type] || a.ann_type;
+}
+
 async function exportMd() {
   const cur = library.current;
   if (!cur) {
@@ -27,10 +44,6 @@ async function exportMd() {
     return;
   }
   try {
-    const md = await invoke<string>("export_annotations_markdown", {
-      documentId: cur.document.id,
-      docTitle: cur.opened.title,
-    });
     const path = await save({
       filters: [{ name: "Markdown", extensions: ["md"] }],
       defaultPath: `${cur.opened.title}-annotations.md`,
@@ -41,8 +54,6 @@ async function exportMd() {
       docTitle: cur.opened.title,
       path,
     });
-    // also keep md var used for typecheck
-    void md;
   } catch (e) {
     app.setError(String(e));
   }
@@ -68,10 +79,16 @@ async function exportMd() {
         v-for="c in colors"
         :key="c"
         class="color-dot"
-        :style="{ background: c, outline: annotations.activeColor === c ? '2px solid var(--accent)' : 'none' }"
+        :style="{
+          background: c,
+          outline: annotations.activeColor === c ? '2px solid var(--accent)' : 'none',
+        }"
         @click="annotations.activeColor = c"
       />
     </div>
+    <p class="muted" style="font-size: 0.72rem; margin: 8px 0 0; line-height: 1.35">
+      Выделение / овал / коммент: зажмите и тяните по странице. Коммент — модальное окно (не prompt).
+    </p>
     <button class="btn" style="margin-top: 10px; width: 100%" @click="exportMd">
       Export ann → MD
     </button>
@@ -80,14 +97,24 @@ async function exportMd() {
         Нет аннотаций
       </div>
       <div v-for="a in annotations.items" :key="a.id" class="ann-item">
-        <div style="display: flex; justify-content: space-between; gap: 8px">
-          <span class="badge">{{ a.ann_type }}</span>
-          <button class="btn btn-danger" style="padding: 2px 8px; font-size: 0.75rem" @click="annotations.remove(a.id)">
+        <div style="display: flex; justify-content: space-between; gap: 8px; align-items: center">
+          <span class="badge" :style="{ borderColor: a.color || undefined }">
+            {{ typeLabel[a.ann_type] || a.ann_type }}
+          </span>
+          <button
+            class="btn btn-danger"
+            style="padding: 2px 8px; font-size: 0.75rem"
+            @click="annotations.remove(a.id)"
+          >
             ×
           </button>
         </div>
-        <div v-if="a.page != null" class="muted" style="font-size: 0.75rem">стр. {{ a.page }}</div>
-        <div style="font-size: 0.85rem; margin-top: 4px">{{ a.content || "—" }}</div>
+        <div v-if="a.page != null" class="muted" style="font-size: 0.75rem; margin-top: 4px">
+          стр. {{ a.page }}
+        </div>
+        <div style="font-size: 0.85rem; margin-top: 4px; line-height: 1.35">
+          {{ labelFor(a) }}
+        </div>
       </div>
     </div>
   </div>
@@ -95,7 +122,7 @@ async function exportMd() {
 
 <style scoped>
 .ann-panel {
-  width: 250px;
+  width: 260px;
   border-left: 1px solid var(--border);
   background: var(--bg-elevated);
   padding: 12px;

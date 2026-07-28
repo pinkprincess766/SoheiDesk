@@ -25,8 +25,16 @@ export default defineConfig(async () => ({
         }
       : undefined,
     watch: {
-      // 3. tell Vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
+      // Avoid rebuild storms: ignore rust, deps, caches, fixtures
+      ignored: [
+        "**/src-tauri/**",
+        "**/node_modules/**",
+        "**/dist/**",
+        "**/.git/**",
+        "**/fixtures/**",
+        "**/*.pdf",
+        "**/*.djvu",
+      ],
     },
   },
 }));

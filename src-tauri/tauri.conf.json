@@ -95,6 +95,48 @@
         "name": "Markdown",
         "description": "Open Markdown in SoheiDesk",
         "role": "Viewer"
+      },
+      {
+        "ext": ["docx"],
+        "name": "Word Document",
+        "description": "Open DOCX in SoheiDesk",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["txt", "text"],
+        "name": "Plain Text",
+        "description": "Open text in SoheiDesk",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["tex", "latex"],
+        "name": "LaTeX",
+        "description": "Open TeX in SoheiDesk",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["epub"],
+        "name": "EPUB",
+        "description": "Open EPUB in SoheiDesk",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["html", "htm"],
+        "name": "HTML",
+        "description": "Open HTML in SoheiDesk",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["fb2"],
+        "name": "FictionBook",
+        "description": "Open FB2 in SoheiDesk",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["djvu", "djv"],
+        "name": "DjVu",
+        "description": "Open DjVu in SoheiDesk",
+        "role": "Viewer"
       }
     ]
   },

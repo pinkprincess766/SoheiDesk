@@ -50,6 +50,11 @@ secrets*
 /grok-image-*.jpg
 /5e290c76-*.jpg
 
+# Keep repo light — never commit build artifacts (can be multi‑GB)
+src-tauri/target/
+dist/
+node_modules/
+
 # Apple Pages originals if reappear
 *.pages
 

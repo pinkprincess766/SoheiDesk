@@ -9,6 +9,9 @@
     "dialog:default",
     {
       "identifier": "core:path:default"
-    }
+    },
+    "core:window:allow-close",
+    "core:window:allow-destroy",
+    "core:window:allow-hide"
   ]
 }

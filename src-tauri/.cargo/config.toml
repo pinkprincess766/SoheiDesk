@@ -1,0 +1,6 @@
+# Faster incremental rebuilds during `tauri dev`
+[build]
+incremental = true
+
+[term]
+quiet = false

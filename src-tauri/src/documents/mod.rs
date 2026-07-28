@@ -18,6 +18,8 @@ pub enum DocType {
     Epub,
     Html,
     Tex,
+    Fb2,
+    Djvu,
 }
 
 impl DocType {
@@ -30,6 +32,8 @@ impl DocType {
             DocType::Epub => "epub",
             DocType::Html => "html",
             DocType::Tex => "tex",
+            DocType::Fb2 => "fb2",
+            DocType::Djvu => "djvu",
         }
     }
 
@@ -42,6 +46,8 @@ impl DocType {
                 | DocType::Epub
                 | DocType::Html
                 | DocType::Tex
+                | DocType::Fb2
+                | DocType::Djvu
         )
     }
 
@@ -59,6 +65,8 @@ impl DocType {
             "epub" => Ok(DocType::Epub),
             "html" | "htm" => Ok(DocType::Html),
             "tex" | "latex" | "ltx" => Ok(DocType::Tex),
+            "fb2" => Ok(DocType::Fb2),
+            "djvu" | "djv" => Ok(DocType::Djvu),
             other => Err(AppError::Message(format!(
                 "unsupported file type: .{other}"
             ))),

@@ -41,11 +41,16 @@ function formatSize(n: number | null | undefined) {
 
     <div v-if="!library.current" class="empty">
       <div>
-        <p style="font-size: 1.1rem; color: var(--text); margin: 0 0 8px">Нет открытого документа</p>
-        <p class="muted" style="margin: 0 0 16px">
-          PDF, MD, TXT, DOCX, EPUB, HTML, TEX — dialog only. ⌘/Ctrl+O
+        <p style="font-size: 1.15rem; color: var(--text); margin: 0 0 8px; font-weight: 600; letter-spacing: -0.02em">
+          Open a document
         </p>
-        <button class="btn btn-primary" @click="library.openViaDialog()">Открыть файл…</button>
+        <p class="muted" style="margin: 0 0 18px; line-height: 1.5">
+          PDF · MD · TXT · DOCX · EPUB · HTML · TEX<br />
+          ⌘/Ctrl+O · or Open With from Finder
+        </p>
+        <button class="btn btn-primary" :disabled="library.loading" @click="library.openViaDialog()">
+          {{ library.loading ? "Opening…" : "Open file…" }}
+        </button>
       </div>
     </div>
 
@@ -65,8 +70,16 @@ function formatSize(n: number | null | undefined) {
           :document-id="library.current.document.id"
         />
         <ReflowViewer
-          v-else-if="['md', 'docx', 'epub', 'html', 'tex'].includes(library.current.opened.doc_type)"
-          :mode="library.current.opened.doc_type === 'tex' ? 'txt' : 'md'"
+          v-else-if="
+            ['md', 'docx', 'epub', 'html', 'tex', 'fb2', 'djvu'].includes(
+              library.current.opened.doc_type,
+            )
+          "
+          :mode="
+            library.current.opened.doc_type === 'tex' || library.current.opened.doc_type === 'djvu'
+              ? 'txt'
+              : 'md'
+          "
           :text="library.current.opened.text || ''"
           :document-id="library.current.document.id"
         />

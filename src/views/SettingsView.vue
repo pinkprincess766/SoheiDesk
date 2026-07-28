@@ -2,6 +2,7 @@
 import { onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useAppStore } from "../stores/app";
+import { useUiModeStore } from "../stores/uiMode";
 
 interface CollabStatus {
   running: boolean;
@@ -11,6 +12,7 @@ interface CollabStatus {
 }
 
 const app = useAppStore();
+const ui = useUiModeStore();
 const chromaPath = ref("");
 const saved = ref(false);
 const collab = ref<CollabStatus | null>(null);
@@ -89,6 +91,22 @@ async function stopCollab() {
           <button class="btn" :class="{ 'btn-primary': app.theme === 'light' }" @click="app.setTheme('light')">
             Light
           </button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 style="margin: 0 0 8px">Режим интерфейса</h3>
+        <p class="muted" style="margin: 0 0 10px; font-size: 0.9rem">
+          Простой — как терминал (текст, мало кнопок). Обычный — полный ридер с PDF-страницами.
+        </p>
+        <div class="toolbar">
+          <button class="btn" :class="{ 'btn-primary': ui.mode === 'simple' }" @click="ui.setMode('simple')">
+            Простой
+          </button>
+          <button class="btn" :class="{ 'btn-primary': ui.mode === 'normal' }" @click="ui.setMode('normal')">
+            Обычный
+          </button>
+          <button class="btn" @click="ui.resetMode()">Спросить при запуске</button>
         </div>
       </div>
 

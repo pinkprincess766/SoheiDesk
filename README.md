@@ -5,137 +5,148 @@
 <h1 align="center">SoheiDesk</h1>
 
 <p align="center">
-  <strong>Scientific reader & lab journal</strong><br />
-  <sub>Offline-first · two UI modes · PDF · DOCX · FB2 · annotations</sub>
+  A local desktop workspace for reading research documents, making annotations,
+  and keeping lab notes.
 </p>
 
 <p align="center">
   <a href="./README.ru.md">Русский</a>
   ·
-  <a href="https://github.com/pinkprincess766/SoheiDesk/releases">Download</a>
+  <a href="https://github.com/pinkprincess766/SoheiDesk/releases">Releases</a>
   ·
-  <a href="https://github.com/pinkprincess766/SoheiDesk">GitHub</a>
+  <a href="#build-from-source">Build from source</a>
 </p>
 
----
+<p align="center">
+  <img src="docs/images/pdf-zoom.gif" width="900" alt="Opening and zooming a PDF in SoheiDesk" />
+</p>
 
-## What is it?
+SoheiDesk is an early-stage desktop app for a straightforward workflow:
+open a paper, mark useful passages, write down what you did, and export the
+result. Core reading and journal data stay on the computer; an account is not
+required.
 
-A **desktop app** for reading papers and keeping light research notes — no account, no cloud required for core work.
+## What works today
 
-| Goal | Where |
-|------|--------|
-| Read PDF / DOCX / MD / FB2 / DjVu… | **Reader** (or Simple mode) |
-| Find text again | **Search** / **Library** |
-| Lab notes | **Journal** |
-| Export reports | **Export** |
+| Area | Current capability |
+|------|--------------------|
+| Reader | Page-based PDF view and reflowed text for common document formats |
+| Annotations | Highlights, comments, freehand strokes, rectangles, ellipses, and arrows |
+| Journal | Built-in and custom templates, attachments, preview, and export |
+| Draft safety | Journal and template drafts are autosaved to SQLite and can be restored explicitly |
+| Library and search | Local document history plus full-text search across documents and journal entries |
+| Export | Markdown, HTML, Typst, LaTeX, and DOCX output |
+| References | DOI lookup, arXiv/PubMed search, bibliography export, and read-only Zotero import |
 
----
+The normal path through the app is deliberately small:
 
-## Two modes (choose on first launch)
+1. Open a paper in **Reader**.
+2. Add a highlight or comment without changing the source file.
+3. Record the result in **Journal**.
+4. Preview and export the note when it is ready to share.
 
-| **Simple** | **Normal** |
-|------------|------------|
-| Terminal-like: text first, few buttons | Full workspace |
-| **Open · Edit · Settings · Close / Quit** | Sidebar: library, journal, RSS, Zotero… |
-| PDF → extracted text (reflow) | PDF → page canvas |
-| Highlight `⌥1` · Comment `⌥2` · hjkl / arrows · Enter | Mouse tools on pages |
+## Screenshots
 
-Change later: **Settings → UI mode**, or Simple → Settings → “Обычный”.
+| PDF reader and annotations | Lab journal templates |
+|:--------------------------:|:---------------------:|
+| <img src="docs/images/reader.png" width="560" alt="PDF reader with annotation tools" /> | <img src="docs/images/journal.png" width="560" alt="Lab journal template picker" /> |
 
----
+## Two interface modes
+
+**Normal mode** exposes the complete workspace: reader, library, journal,
+search, export, references, RSS, Zotero, OCR, and settings.
+
+**Simple mode** is a keyboard-oriented reflow reader with a small toolbar.
+It is useful when the document text matters more than the original page
+layout. Change modes at first launch or later in Settings.
+
+Common shortcuts in Normal mode:
+
+| Shortcut | Action |
+|----------|--------|
+| `⌘/Ctrl+O` | Open a document |
+| `⌘/Ctrl+F` | Search |
+| `⌘/Ctrl+J` | Open the journal |
+| `⌘/Ctrl+,` | Open settings |
 
 ## Install
 
-1. Open **[Releases](https://github.com/pinkprincess766/SoheiDesk/releases)**
-2. Download for your OS:
+Published builds, when available, are attached to
+[GitHub Releases](https://github.com/pinkprincess766/SoheiDesk/releases).
+Download the asset that matches your operating system:
 
-| OS | File |
-|----|------|
-| macOS (Apple Silicon or Intel) | `SoheiDesk_…_universal.dmg` or arm64 DMG |
-| Windows | `.msi` / setup `.exe` |
-| Linux | `.AppImage` / `.deb` |
+- macOS: `.dmg`
+- Windows: `.msi` or setup `.exe`
+- Linux: `.AppImage` or `.deb`
 
-3. Install and open **SoheiDesk**.
-
-**Open with:** right‑click a PDF → *Open With* → SoheiDesk.
-
-### Optional (DjVu text)
-
-```bash
-brew install djvulibre   # provides djvutxt
-```
-
-Without it, DjVu still opens with a short help note; PDF/DOCX/MD/FB2 work as usual.
-
----
-
-## First steps
-
-### Simple
-1. Pick **Простой / Simple** at launch  
-2. **Open** a document  
-3. `⌥1` highlight · `⌥2` comment · **hjkl** · **Enter** · **Esc**  
-4. **Quit** closes the app  
-
-### Normal
-1. Pick **Обычный / Normal**  
-2. **Reader** → Open file (`⌘/Ctrl+O`)  
-3. Annotate in the right panel  
-4. Journal / Export / Search as needed  
-
-Shortcuts (Normal): `⌘O` open · `⌘F` search · `⌘J` journal · `⌘,` settings  
-
----
-
-## Privacy
-
-- Files stay on **your disk**  
-- App data: OS Application Support (SQLite + media cache)  
-- No account for core reading  
-
----
-
-## Build from source
-
-```bash
-# Need: Rust, Node 20+, pnpm
-git clone https://github.com/pinkprincess766/SoheiDesk.git
-cd SoheiDesk
-pnpm install
-pnpm app:dev          # full Tauri + Vite
-pnpm app:dev:ui       # UI only (no Rust rebuild)
-pnpm app:build        # installers
-pnpm clean            # drop multi‑GB target/ (safe)
-```
-
-**Disk:** `src-tauri/target` can grow to several GB during builds — it is gitignored. Run `pnpm clean` anytime.
-
-**Icons:** `assets/brand/app-icon-1024.png` → `pnpm app:icons`
-
----
-
-## Stack
-
-- **UI:** Vue 3 + TypeScript + Pinia  
-- **Shell:** Tauri 2  
-- **Core:** Rust (parsers, SQLite, PDF text, FS)  
-- **Fonts:** [DM Sans](https://fonts.google.com/specimen/DM+Sans) · [JetBrains Mono](https://fonts.google.com/specimen/JetBrains+Mono) (OFL)  
-
-PDF pages use pdf.js in Normal mode; Simple mode uses Rust/pdf text extract (cached).
-
----
+The application is not currently code-signed for every platform, so the
+operating system may show an unknown-developer warning. If a build is not
+available for your platform, use the source build below.
 
 ## Formats
 
-PDF · Markdown · TXT · DOCX · EPUB · HTML · TeX · **FB2** · **DjVu** (text via DjVuLibre)
+| Format | How it is opened |
+|--------|------------------|
+| PDF | Original pages through PDF.js; extracted text is also cached for Simple mode and search |
+| DOCX, EPUB, FB2, HTML, Markdown | Converted to a reflowed reading view |
+| TXT, TeX | Plain-text reading view |
+| DjVu | Text extraction through the optional `djvutxt` command from DjVuLibre |
 
----
+Scanned PDFs need OCR before their text can be searched. Encrypted PDFs are
+not supported at the moment.
+
+## Data and network use
+
+- Documents, annotations, journal entries, drafts, and settings are stored
+  locally.
+- SoheiDesk does not require an account for core work.
+- Network access is used only when you request an online feature such as DOI,
+  arXiv, PubMed, or RSS.
+- Zotero import opens the database read-only.
+- OCR, DjVu support, plugins, and ChromaTsvet integration can invoke tools
+  installed on the computer.
+- LAN sharing is optional and intended for a trusted local network, not the
+  public internet.
+
+SoheiDesk is under active development and is not a validated electronic
+laboratory notebook. Keep normal backups of important source documents and
+application data.
+
+## Build from source
+
+Requirements: Rust, Node.js 20 or newer, and pnpm.
+
+```bash
+git clone https://github.com/pinkprincess766/SoheiDesk.git
+cd SoheiDesk
+pnpm install
+pnpm app:dev
+```
+
+Useful commands:
+
+```bash
+pnpm test:frontend   # frontend regression and security tests
+pnpm build           # TypeScript check + production UI build
+pnpm app:build       # desktop installers
+
+cargo test --manifest-path src-tauri/Cargo.toml
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+```
+
+`src-tauri/target` can grow to several gigabytes during Rust builds. Run
+`pnpm clean` to remove generated build artifacts.
+
+## Current scope
+
+The present product is a local reader and research journal. Semantic AI
+search, automatic spectroscopy reports, voice control, and knowledge maps are
+ideas for later work, not current features.
+
+## Stack
+
+Vue 3 · TypeScript · Pinia · Tauri 2 · Rust · SQLite · PDF.js
 
 ## License
 
-See [LICENSE](./LICENSE).
-
-<p align="center">
-  <sub>Built for people who read papers — not another SaaS login.</sub>
-</p>
+[MIT](./LICENSE)

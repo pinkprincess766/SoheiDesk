@@ -50,7 +50,10 @@ fn client() -> AppResult<reqwest::blocking::Client> {
 pub fn resolve_doi(doi: &str) -> AppResult<LiteratureHit> {
     let doi = doi.trim().trim_start_matches("https://doi.org/");
     let doi = doi.trim_start_matches("http://doi.org/");
-    let url = format!("https://api.crossref.org/works/{}", urlencoding::encode(doi));
+    let url = format!(
+        "https://api.crossref.org/works/{}",
+        urlencoding::encode(doi)
+    );
     let client = client()?;
     let resp = client
         .get(&url)
@@ -128,7 +131,7 @@ pub fn resolve_doi(doi: &str) -> AppResult<LiteratureHit> {
         journal,
         doi: Some(doi_str),
         url: Some(url),
-        abstract_text: msg["abstract"].as_str().map(|s| strip_jats(s)),
+        abstract_text: msg["abstract"].as_str().map(strip_jats),
         bibtex,
     })
 }
@@ -142,9 +145,8 @@ fn strip_jats(s: &str) -> String {
 pub fn search_arxiv(query: &str, max_results: usize) -> AppResult<Vec<LiteratureHit>> {
     let q = urlencoding::encode(query);
     let n = max_results.clamp(1, 25);
-    let url = format!(
-        "http://export.arxiv.org/api/query?search_query=all:{q}&start=0&max_results={n}"
-    );
+    let url =
+        format!("http://export.arxiv.org/api/query?search_query=all:{q}&start=0&max_results={n}");
     let client = client()?;
     let text = client
         .get(&url)
@@ -167,11 +169,12 @@ fn parse_arxiv_atom(xml: &str) -> AppResult<Vec<LiteratureHit>> {
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ");
-        let summary = extract_tag(entry, "summary").map(|s| {
-            s.split_whitespace().collect::<Vec<_>>().join(" ")
-        });
+        let summary = extract_tag(entry, "summary")
+            .map(|s| s.split_whitespace().collect::<Vec<_>>().join(" "));
         let published = extract_tag(entry, "published");
-        let year = published.as_ref().and_then(|p| p.get(0..4).map(|s| s.to_string()));
+        let year = published
+            .as_ref()
+            .and_then(|p| p.get(0..4).map(|s| s.to_string()));
         let mut authors = Vec::new();
         for a in entry.split("<author>").skip(1) {
             if let Some(name) = extract_tag(a, "name") {
@@ -333,6 +336,7 @@ pub fn search_pubmed(query: &str, max_results: usize) -> AppResult<Vec<Literatur
     Ok(hits)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn to_bibtex(
     entry_type_prefix: &str,
     key_base: &str,

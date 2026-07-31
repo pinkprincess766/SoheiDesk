@@ -57,7 +57,8 @@ fn is_path_authorized(db: &DbState, path: &str) -> AppResult<bool> {
     }
 
     with_conn(db, |conn| {
-        let mut stmt = conn.prepare("SELECT last_path FROM documents WHERE last_path IS NOT NULL")?;
+        let mut stmt =
+            conn.prepare("SELECT last_path FROM documents WHERE last_path IS NOT NULL")?;
         let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
         for r in rows {
             let stored = r?;
@@ -140,7 +141,9 @@ pub fn read_authorized_file(
             is_path_authorized(&db, &canon_s)?
         };
         if !still_ok {
-            return Err(AppError::Message("path is not authorized after resolve".into()));
+            return Err(AppError::Message(
+                "path is not authorized after resolve".into(),
+            ));
         }
         return read_path(canon);
     }
@@ -178,4 +181,43 @@ fn read_path(path: PathBuf) -> AppResult<FileBytes> {
         mime: mime.into(),
         size,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::Connection;
+    use std::sync::Mutex;
+
+    fn state_at(path: PathBuf) -> DbState {
+        DbState {
+            conn: Mutex::new(Connection::open_in_memory().expect("in-memory database")),
+            data_dir: path,
+        }
+    }
+
+    #[test]
+    fn media_cache_check_respects_directory_boundary() {
+        let root = std::env::temp_dir().join("soheidesk-auth-boundary");
+        let db = state_at(root.clone());
+        assert!(is_under_media_cache(
+            &db,
+            &root
+                .join("media")
+                .join("doc")
+                .join("page.png")
+                .to_string_lossy()
+        ));
+        assert!(!is_under_media_cache(
+            &db,
+            &root.join("mediaevil").join("secret").to_string_lossy()
+        ));
+    }
+
+    #[test]
+    fn private_prefix_normalization_is_segment_stable() {
+        assert_eq!(strip_private_prefix("/private/tmp/a"), "/tmp/a");
+        assert_eq!(strip_private_prefix("/private/var/a"), "/var/a");
+        assert_eq!(strip_private_prefix("/Users/example/a"), "/Users/example/a");
+    }
 }

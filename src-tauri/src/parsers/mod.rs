@@ -61,9 +61,8 @@ pub fn open_document(path: &Path, cache_dir: Option<&Path>) -> AppResult<OpenedD
             if let Some(dir) = cache_dir {
                 let dest = dir.join("document.pdf");
                 if !dest.is_file() || dest.metadata().map(|m| m.len()).unwrap_or(0) != file_size {
-                    std::fs::copy(path, &dest).map_err(|e| {
-                        AppError::Message(format!("failed to cache PDF: {e}"))
-                    })?;
+                    std::fs::copy(path, &dest)
+                        .map_err(|e| AppError::Message(format!("failed to cache PDF: {e}")))?;
                 }
                 cache_path = Some(dest.to_string_lossy().to_string());
             }

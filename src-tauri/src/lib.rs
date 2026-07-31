@@ -20,7 +20,9 @@ mod templates;
 use collab::CollabState;
 use pending_open::PendingOpen;
 use search::SearchState;
-use tauri::{Emitter, Manager};
+#[cfg(target_os = "macos")]
+use tauri::Emitter;
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -60,6 +62,10 @@ pub fn run() {
             commands::delete_template,
             commands::list_journal_entries,
             commands::get_journal_entry,
+            commands::get_journal_draft,
+            commands::list_journal_drafts,
+            commands::save_journal_draft,
+            commands::delete_journal_draft,
             commands::create_journal_entry,
             commands::update_journal_entry,
             commands::delete_journal_entry,

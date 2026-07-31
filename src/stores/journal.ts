@@ -1,7 +1,13 @@
 import { defineStore } from "pinia";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import type { ExportPreview, JournalEntry, TemplateRecord } from "../types";
+import type {
+  ExportPreview,
+  JournalDraft,
+  JournalDraftPayload,
+  JournalEntry,
+  TemplateRecord,
+} from "../types";
 import { useAppStore } from "./app";
 
 export const useJournalStore = defineStore("journal", {
@@ -34,6 +40,27 @@ export const useJournalStore = defineStore("journal", {
       } catch (e) {
         app.setError(String(e));
       }
+    },
+
+    getDraft<T = JournalDraftPayload>(draftKey: string) {
+      return invoke<JournalDraft<T> | null>("get_journal_draft", { draftKey });
+    },
+
+    listDrafts() {
+      return invoke<JournalDraft<unknown>[]>("list_journal_drafts");
+    },
+
+    saveDraft<T = JournalDraftPayload>(input: {
+      draft_key: string;
+      entry_id: string | null;
+      payload: T;
+      base_updated_at: string | null;
+    }) {
+      return invoke<JournalDraft<T>>("save_journal_draft", { input });
+    },
+
+    deleteDraft(draftKey: string) {
+      return invoke<void>("delete_journal_draft", { draftKey });
     },
 
     async create(input: {
@@ -149,10 +176,12 @@ export const useJournalStore = defineStore("journal", {
     }) {
       const app = useAppStore();
       try {
-        await invoke("create_template", { input });
+        const template = await invoke<TemplateRecord>("create_template", { input });
         await this.refresh();
+        return template;
       } catch (e) {
         app.setError(String(e));
+        return null;
       }
     },
 

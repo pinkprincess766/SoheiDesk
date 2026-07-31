@@ -69,6 +69,30 @@ export interface JournalEntry {
   updated_at: string;
 }
 
+export interface JournalDraftPayload {
+  title: string;
+  template_id: string | null;
+  body_md: string;
+  fields: Record<string, string>;
+  tags: string;
+  entry_date: string;
+}
+
+export interface TemplateEditorDraftPayload {
+  name: string;
+  body_md: string;
+  fields_json: string;
+}
+
+export interface JournalDraft<T = JournalDraftPayload> {
+  draft_key: string;
+  entry_id: string | null;
+  payload: T;
+  base_updated_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ExportPreview {
   markdown: string;
   title: string;

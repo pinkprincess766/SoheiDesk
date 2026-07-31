@@ -26,12 +26,5 @@ pub fn index_document(
     doc_type: String,
     text: Option<String>,
 ) -> AppResult<()> {
-    search::index_opened_document(
-        &search,
-        &id,
-        &title,
-        &path,
-        &doc_type,
-        text.as_deref(),
-    )
+    search::index_opened_document(&search, &id, &title, &path, &doc_type, text.as_deref())
 }

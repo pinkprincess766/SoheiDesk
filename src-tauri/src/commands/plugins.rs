@@ -19,11 +19,7 @@ pub fn delete_plugin(db: State<'_, DbState>, id: String) -> AppResult<()> {
 }
 
 #[tauri::command]
-pub fn set_plugin_enabled(
-    db: State<'_, DbState>,
-    id: String,
-    enabled: bool,
-) -> AppResult<Plugin> {
+pub fn set_plugin_enabled(db: State<'_, DbState>, id: String, enabled: bool) -> AppResult<Plugin> {
     plugins::set_enabled(&db, &id, enabled)
 }
 

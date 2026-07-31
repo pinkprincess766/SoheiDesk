@@ -94,10 +94,10 @@ pub fn extract_text(path: &Path) -> AppResult<String> {
                         if out.is_empty() {
                             out.push_str("# ");
                         }
-                        out.push_str(&s);
+                        out.push_str(s);
                         out.push(' ');
                     } else if in_body && (in_p || in_v || tag_stack.iter().any(|t| t == "title")) {
-                        out.push_str(&s);
+                        out.push_str(s);
                         out.push(' ');
                     }
                 }

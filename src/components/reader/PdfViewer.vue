@@ -75,6 +75,8 @@ let scaleTimer: ReturnType<typeof setTimeout> | null = null;
 let scaleGen = 0;
 /** Scroll ratio 0..1 while re-rendering zoom (more stable than page anchors) */
 let scrollRatio = 0;
+const ZOOM_TRANSITION_MS = 160;
+const ZOOM_RENDER_DEBOUNCE_MS = 220;
 
 const pageAnns = computed(() => {
   const map = new Map<number, Annotation[]>();
@@ -311,6 +313,55 @@ function restoreScrollRatio() {
     // Ensure overflow scroll still works after DOM rebuild
     root.style.overflow = "auto";
     root.style.pointerEvents = "auto";
+    updateCurrentPageFromScroll();
+  });
+}
+
+/**
+ * Give zoom controls immediate feedback using the already-rendered canvases.
+ * PDF.js replaces this GPU-scaled preview with crisp canvases after the user
+ * pauses, so repeated clicks do not trigger repeated expensive renders.
+ */
+function applyZoomPreview() {
+  const root = containerRef.value;
+  if (!root || pageSlots.length === 0) return;
+
+  captureScrollRatio();
+  const animate = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const transition = animate
+    ? `transform ${ZOOM_TRANSITION_MS}ms cubic-bezier(0.2, 0.8, 0.2, 1)`
+    : "none";
+  const estimatedHeight = Math.round(EST_PAGE_HEIGHT * (scale.value / 1.15));
+
+  for (const slot of pageSlots) {
+    const view = slot.view;
+    if (!view) {
+      slot.height = estimatedHeight;
+      slot.el.style.minHeight = `${estimatedHeight}px`;
+      continue;
+    }
+
+    const ratio = scale.value / view.scale;
+    const previewWidth = view.viewport.width * ratio;
+    const previewHeight = view.viewport.height * ratio;
+
+    view.wrap.style.transformOrigin = "top center";
+    view.wrap.style.transition = transition;
+    view.wrap.style.willChange = "transform";
+    view.wrap.style.transform = `scale(${ratio})`;
+    // The transform itself does not participate in layout. Keep slots at the
+    // visual size to prevent page overlap and large gaps during the preview.
+    slot.el.style.width = `${previewWidth}px`;
+    slot.el.style.minHeight = `${previewHeight}px`;
+    slot.height = previewHeight;
+    // Annotation coordinates belong to the crisp viewport; avoid accepting a
+    // stroke during the brief scaled-preview phase.
+    view.overlay.style.pointerEvents = "none";
+  }
+
+  requestAnimationFrame(() => {
+    const max = Math.max(0, root.scrollHeight - root.clientHeight);
+    root.scrollTop = scrollRatio * max;
     updateCurrentPageFromScroll();
   });
 }
@@ -915,10 +966,12 @@ watch(
 watch(scale, () => {
   if (!pdfDoc || loading.value) return;
   if (scaleTimer) clearTimeout(scaleTimer);
-  // Longer debounce — avoid “вечная пересборка” while clicking +/−
+  applyZoomPreview();
+  // Render once after interaction settles. Until then the existing canvases
+  // animate smoothly on the compositor.
   scaleTimer = setTimeout(() => {
     void renderAllPagesPreservingScroll();
-  }, 280);
+  }, ZOOM_RENDER_DEBOUNCE_MS);
 });
 
 function onScroll() {
@@ -1035,6 +1088,7 @@ onBeforeUnmount(() => {
   overflow: auto;
   padding: 16px;
   background: color-mix(in srgb, var(--bg) 80%, #000);
+  overscroll-behavior: contain;
 }
 .pdf-overlay-msg {
   position: absolute;

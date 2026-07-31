@@ -61,9 +61,7 @@ fn empty_hint(path: &Path) -> String {
          PDF: текстовый слой пуст или это скан (нужен OCR).\n\n\
          В **Обычном** режиме можно листать страницы как изображения.\n\n\
          path: {}\n",
-        path.file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("PDF"),
+        path.file_stem().and_then(|s| s.to_str()).unwrap_or("PDF"),
         path.display()
     )
 }
@@ -160,8 +158,7 @@ fn cleanup_pdf_text(s: &str) -> String {
     for line in s.lines() {
         let t = line
             .replace('\u{00A0}', " ")
-            .replace('\u{000C}', "")
-            .replace('\u{00AD}', "")
+            .replace(['\u{000C}', '\u{00AD}'], "")
             .trim_end()
             .to_string();
         if t.is_empty() {

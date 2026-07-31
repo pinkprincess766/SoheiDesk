@@ -4,8 +4,8 @@ use std::path::Path;
 
 /// Extract concatenated chapter text from an EPUB (best-effort, no DRM).
 pub fn extract_text(path: &Path) -> AppResult<String> {
-    let mut doc = EpubDoc::new(path)
-        .map_err(|e| AppError::Message(format!("epub open failed: {e}")))?;
+    let mut doc =
+        EpubDoc::new(path).map_err(|e| AppError::Message(format!("epub open failed: {e}")))?;
 
     let mut parts: Vec<String> = Vec::new();
 

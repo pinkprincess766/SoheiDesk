@@ -1,6 +1,8 @@
 use crate::db::DbState;
 use crate::error::AppResult;
-use crate::journal::{self, ExportPreview, JournalEntry, JournalEntryInput};
+use crate::journal::{
+    self, ExportPreview, JournalDraft, JournalDraftInput, JournalEntry, JournalEntryInput,
+};
 use crate::search::{self, SearchState};
 use crate::templates::{self, TemplateInput, TemplateRecord};
 use tauri::State;
@@ -37,6 +39,32 @@ pub fn list_journal_entries(db: State<'_, DbState>) -> AppResult<Vec<JournalEntr
 #[tauri::command]
 pub fn get_journal_entry(db: State<'_, DbState>, id: String) -> AppResult<JournalEntry> {
     journal::get_entry(&db, &id)
+}
+
+#[tauri::command]
+pub fn get_journal_draft(
+    db: State<'_, DbState>,
+    draft_key: String,
+) -> AppResult<Option<JournalDraft>> {
+    journal::get_draft(&db, &draft_key)
+}
+
+#[tauri::command]
+pub fn list_journal_drafts(db: State<'_, DbState>) -> AppResult<Vec<JournalDraft>> {
+    journal::list_drafts(&db)
+}
+
+#[tauri::command]
+pub fn save_journal_draft(
+    db: State<'_, DbState>,
+    input: JournalDraftInput,
+) -> AppResult<JournalDraft> {
+    journal::save_draft(&db, input)
+}
+
+#[tauri::command]
+pub fn delete_journal_draft(db: State<'_, DbState>, draft_key: String) -> AppResult<()> {
+    journal::delete_draft(&db, &draft_key)
 }
 
 #[tauri::command]
@@ -79,11 +107,7 @@ pub fn preview_journal_export(db: State<'_, DbState>, id: String) -> AppResult<E
 }
 
 #[tauri::command]
-pub fn export_journal_entry(
-    db: State<'_, DbState>,
-    id: String,
-    path: String,
-) -> AppResult<()> {
+pub fn export_journal_entry(db: State<'_, DbState>, id: String, path: String) -> AppResult<()> {
     journal::export_entry_to_path(&db, &id, &path)
 }
 
@@ -97,11 +121,7 @@ pub fn save_entry_as_template(
 }
 
 #[tauri::command]
-pub fn export_template_file(
-    db: State<'_, DbState>,
-    id: String,
-    path: String,
-) -> AppResult<()> {
+pub fn export_template_file(db: State<'_, DbState>, id: String, path: String) -> AppResult<()> {
     templates::export_template_to_path(&db, &id, &path)
 }
 

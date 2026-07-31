@@ -134,6 +134,20 @@ const MIGRATIONS: &[&str] = &[
 
     CREATE INDEX IF NOT EXISTS idx_rss_items_feed ON rss_items(feed_id);
     "#,
+    // 004 — crash-safe journal drafts
+    r#"
+    CREATE TABLE IF NOT EXISTS journal_drafts (
+        draft_key TEXT PRIMARY KEY,
+        entry_id TEXT,
+        payload_json TEXT NOT NULL,
+        base_updated_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_journal_drafts_entry
+        ON journal_drafts(entry_id);
+    "#,
 ];
 
 pub fn apply(conn: &Connection) -> AppResult<()> {
@@ -163,4 +177,40 @@ pub fn apply(conn: &Connection) -> AppResult<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn upgrades_v3_database_with_journal_drafts() {
+        let conn = Connection::open_in_memory().expect("database");
+        conn.execute_batch(
+            "CREATE TABLE schema_migrations (
+                version INTEGER PRIMARY KEY,
+                applied_at TEXT NOT NULL
+             );
+             INSERT INTO schema_migrations(version, applied_at)
+             VALUES (1, 't'), (2, 't'), (3, 't');",
+        )
+        .expect("v3 schema marker");
+
+        apply(&conn).expect("apply migration");
+        let version: i64 = conn
+            .query_row("SELECT MAX(version) FROM schema_migrations", [], |row| {
+                row.get(0)
+            })
+            .expect("schema version");
+        let draft_table: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type='table' AND name='journal_drafts'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("draft table");
+        assert_eq!(version, 4);
+        assert_eq!(draft_table, 1);
+    }
 }

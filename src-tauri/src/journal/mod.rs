@@ -37,6 +37,24 @@ pub struct ExportPreview {
     pub title: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JournalDraft {
+    pub draft_key: String,
+    pub entry_id: Option<String>,
+    pub payload: Value,
+    pub base_updated_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct JournalDraftInput {
+    pub draft_key: String,
+    pub entry_id: Option<String>,
+    pub payload: Value,
+    pub base_updated_at: Option<String>,
+}
+
 fn map_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<JournalEntry> {
     Ok(JournalEntry {
         id: row.get(0)?,
@@ -79,7 +97,10 @@ pub fn get_entry(db: &DbState, id: &str) -> AppResult<JournalEntry> {
     })
 }
 
-fn fields_schema_from_entry(entry_fields_snapshot: &Option<String>, template: Option<&TemplateRecord>) -> AppResult<Vec<TemplateField>> {
+fn fields_schema_from_entry(
+    entry_fields_snapshot: &Option<String>,
+    template: Option<&TemplateRecord>,
+) -> AppResult<Vec<TemplateField>> {
     if let Some(snap) = entry_fields_snapshot {
         if let Ok(v) = serde_json::from_str::<Value>(snap) {
             if let Some(fields) = v.get("fields") {
@@ -93,7 +114,10 @@ fn fields_schema_from_entry(entry_fields_snapshot: &Option<String>, template: Op
     Ok(vec![])
 }
 
-pub fn validate_entry_fields(fields_schema: &[TemplateField], values: &Map<String, Value>) -> AppResult<()> {
+pub fn validate_entry_fields(
+    fields_schema: &[TemplateField],
+    values: &Map<String, Value>,
+) -> AppResult<()> {
     for f in fields_schema {
         if !f.required {
             continue;
@@ -251,6 +275,99 @@ pub fn delete_entry(db: &DbState, id: &str) -> AppResult<()> {
         if n == 0 {
             return Err(AppError::Message("journal entry not found".into()));
         }
+        conn.execute(
+            "DELETE FROM journal_drafts WHERE entry_id = ?1 OR draft_key = ?2",
+            params![id, format!("entry:{id}")],
+        )?;
+        Ok(())
+    })
+}
+
+fn map_draft_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<JournalDraft> {
+    let payload_json: String = row.get(2)?;
+    let payload = serde_json::from_str(&payload_json).unwrap_or(Value::Null);
+    Ok(JournalDraft {
+        draft_key: row.get(0)?,
+        entry_id: row.get(1)?,
+        payload,
+        base_updated_at: row.get(3)?,
+        created_at: row.get(4)?,
+        updated_at: row.get(5)?,
+    })
+}
+
+pub fn get_draft(db: &DbState, draft_key: &str) -> AppResult<Option<JournalDraft>> {
+    with_conn(db, |conn| {
+        let mut stmt = conn.prepare(
+            "SELECT draft_key, entry_id, payload_json, base_updated_at, created_at, updated_at
+             FROM journal_drafts WHERE draft_key = ?1",
+        )?;
+        let mut rows = stmt.query([draft_key])?;
+        Ok(match rows.next()? {
+            Some(row) => Some(map_draft_row(row)?),
+            None => None,
+        })
+    })
+}
+
+pub fn list_drafts(db: &DbState) -> AppResult<Vec<JournalDraft>> {
+    with_conn(db, |conn| {
+        let mut stmt = conn.prepare(
+            "SELECT draft_key, entry_id, payload_json, base_updated_at, created_at, updated_at
+             FROM journal_drafts ORDER BY updated_at DESC",
+        )?;
+        let rows = stmt.query_map([], map_draft_row)?;
+        let mut drafts = Vec::new();
+        for row in rows {
+            drafts.push(row?);
+        }
+        Ok(drafts)
+    })
+}
+
+pub fn save_draft(db: &DbState, input: JournalDraftInput) -> AppResult<JournalDraft> {
+    let key = input.draft_key.trim();
+    if key.is_empty() || key.len() > 200 || input.payload.is_null() {
+        return Err(AppError::Message("invalid journal draft".into()));
+    }
+    let payload_json = serde_json::to_string(&input.payload)?;
+    // Protect IPC and the local database from accidentally storing enormous
+    // pasted binaries. Attachments belong in the media store.
+    if payload_json.len() > 2 * 1024 * 1024 {
+        return Err(AppError::Message(
+            "journal draft exceeds the 2 MiB safety limit".into(),
+        ));
+    }
+    let now = Utc::now().to_rfc3339();
+    with_conn(db, |conn| {
+        conn.execute(
+            "INSERT INTO journal_drafts
+             (draft_key, entry_id, payload_json, base_updated_at, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5)
+             ON CONFLICT(draft_key) DO UPDATE SET
+               entry_id=excluded.entry_id,
+               payload_json=excluded.payload_json,
+               base_updated_at=excluded.base_updated_at,
+               updated_at=excluded.updated_at",
+            params![
+                key,
+                input.entry_id,
+                payload_json,
+                input.base_updated_at,
+                now
+            ],
+        )?;
+        Ok(())
+    })?;
+    get_draft(db, key)?.ok_or_else(|| AppError::Message("draft save failed".into()))
+}
+
+pub fn delete_draft(db: &DbState, draft_key: &str) -> AppResult<()> {
+    with_conn(db, |conn| {
+        conn.execute(
+            "DELETE FROM journal_drafts WHERE draft_key = ?1",
+            [draft_key],
+        )?;
         Ok(())
     })
 }
@@ -306,7 +423,11 @@ pub fn export_entry_to_path(db: &DbState, id: &str, path: &str) -> AppResult<()>
     Ok(())
 }
 
-pub fn save_entry_as_template(db: &DbState, entry_id: &str, name: String) -> AppResult<TemplateRecord> {
+pub fn save_entry_as_template(
+    db: &DbState,
+    entry_id: &str,
+    name: String,
+) -> AppResult<TemplateRecord> {
     let entry = get_entry(db, entry_id)?;
     let fields = fields_schema_from_entry(&entry.template_snapshot_json, None).unwrap_or_default();
     let tags: Vec<String> = entry
@@ -332,6 +453,20 @@ pub fn save_entry_as_template(db: &DbState, entry_id: &str, name: String) -> App
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::sync::Mutex;
+
+    fn test_state() -> (DbState, std::path::PathBuf) {
+        let path =
+            std::env::temp_dir().join(format!("soheidesk-journal-{}.sqlite", Uuid::new_v4()));
+        let conn = crate::db::open(&path).expect("test database");
+        (
+            DbState {
+                conn: Mutex::new(conn),
+                data_dir: std::env::temp_dir(),
+            },
+            path,
+        )
+    }
 
     #[test]
     fn markdown_export_includes_title_and_body() {
@@ -368,5 +503,73 @@ mod tests {
         let mut filled = Map::new();
         filled.insert("sample".into(), Value::String("x".into()));
         assert!(validate_entry_fields(&schema, &filled).is_ok());
+    }
+
+    #[test]
+    fn journal_draft_roundtrip_update_and_delete() {
+        let (db, path) = test_state();
+        let first = save_draft(
+            &db,
+            JournalDraftInput {
+                draft_key: "new".into(),
+                entry_id: None,
+                payload: json!({"title": "first", "body_md": "body"}),
+                base_updated_at: None,
+            },
+        )
+        .expect("save draft");
+        assert_eq!(first.payload["title"], "first");
+
+        let updated = save_draft(
+            &db,
+            JournalDraftInput {
+                draft_key: "new".into(),
+                entry_id: None,
+                payload: json!({"title": "second", "body_md": "new body"}),
+                base_updated_at: None,
+            },
+        )
+        .expect("update draft");
+        assert_eq!(updated.created_at, first.created_at);
+        assert_eq!(
+            get_draft(&db, "new")
+                .expect("get draft")
+                .expect("draft exists")
+                .payload["title"],
+            "second"
+        );
+        assert_eq!(list_drafts(&db).expect("list drafts").len(), 1);
+
+        delete_draft(&db, "new").expect("delete draft");
+        assert!(get_draft(&db, "new").expect("get deleted draft").is_none());
+        drop(db);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn journal_draft_rejects_invalid_or_oversized_payload() {
+        let (db, path) = test_state();
+        assert!(save_draft(
+            &db,
+            JournalDraftInput {
+                draft_key: String::new(),
+                entry_id: None,
+                payload: json!({"title": "x"}),
+                base_updated_at: None,
+            }
+        )
+        .is_err());
+        assert!(save_draft(
+            &db,
+            JournalDraftInput {
+                draft_key: "new".into(),
+                entry_id: None,
+                payload: json!({"body_md": "x".repeat(2 * 1024 * 1024 + 1)}),
+                base_updated_at: None,
+            }
+        )
+        .is_err());
+        drop(db);
+        let _ = std::fs::remove_file(path);
     }
 }

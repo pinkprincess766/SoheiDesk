@@ -23,6 +23,7 @@ pub struct CollabState {
 
 struct CollabHandle {
     port: u16,
+    token: String,
     stop: Arc<std::sync::atomic::AtomicBool>,
 }
 
@@ -41,10 +42,10 @@ impl CollabState {
             CollabStatus {
                 running: true,
                 port: Some(h.port),
-                url: Some(format!("http://127.0.0.1:{}/", h.port)),
+                url: Some(format!("http://127.0.0.1:{}/?token={}", h.port, h.token)),
                 message: format!(
-                    "LAN share running on port {}. Others on the same network can open http://<your-ip>:{}/",
-                    h.port, h.port
+                    "LAN share running on port {}. Access requires the secret URL shown above.",
+                    h.port
                 ),
             }
         } else {
@@ -75,9 +76,12 @@ impl CollabState {
         let addr: SocketAddr = format!("0.0.0.0:{port}")
             .parse()
             .map_err(|e| AppError::Message(format!("bad port: {e}")))?;
-        let server = Server::http(addr).map_err(|e| AppError::Message(format!("bind failed: {e}")))?;
+        let server =
+            Server::http(addr).map_err(|e| AppError::Message(format!("bind failed: {e}")))?;
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let stop_t = stop.clone();
+        let token = uuid::Uuid::new_v4().simple().to_string();
+        let token_t = token.clone();
 
         // Snapshot data dir path for thread — re-open SQLite readonly per request
         let db_path = db.data_dir.join("soheidesk.sqlite");
@@ -90,49 +94,66 @@ impl CollabState {
                 let url = request.url().to_string();
                 let method = request.method().clone();
                 if method != Method::Get {
-                    let _ = request.respond(Response::from_string("method not allowed").with_status_code(405));
+                    let _ = request
+                        .respond(Response::from_string("method not allowed").with_status_code(405));
+                    continue;
+                }
+                if request_token(&url) != Some(token_t.as_str()) {
+                    let _ = request
+                        .respond(Response::from_string("unauthorized").with_status_code(401));
                     continue;
                 }
 
-                let body = match render_page(&db_path, &url) {
+                let body = match render_page(&db_path, &url, &token_t) {
                     Ok(html) => html,
                     Err(e) => format!("<pre>error: {e}</pre>"),
                 };
                 let mut response = Response::from_string(body);
-                if let Ok(h) = Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..]) {
+                if let Ok(h) =
+                    Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..])
+                {
                     response = response.with_header(h);
                 }
                 let _ = request.respond(response);
             }
         });
 
-        *self.inner.lock() = Some(CollabHandle { port, stop });
+        *self.inner.lock() = Some(CollabHandle { port, token, stop });
         Ok(self.status())
     }
 }
 
-fn render_page(db_path: &std::path::Path, url: &str) -> AppResult<String> {
-    let conn = rusqlite::Connection::open_with_flags(
-        db_path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )
-    .map_err(|e| AppError::Message(format!("open db: {e}")))?;
+fn request_token(url: &str) -> Option<&str> {
+    url.split_once('?')
+        .map(|(_, query)| query)
+        .and_then(|query| {
+            query
+                .split('&')
+                .find_map(|part| part.strip_prefix("token="))
+        })
+}
+
+fn render_page(db_path: &std::path::Path, url: &str, token: &str) -> AppResult<String> {
+    let conn =
+        rusqlite::Connection::open_with_flags(db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|e| AppError::Message(format!("open db: {e}")))?;
 
     let path = url.split('?').next().unwrap_or("/");
     match path {
         "/" | "/index.html" => Ok(page_shell(
             "SoheiDesk LAN",
+            token,
             r#"
             <h1>SoheiDesk · LAN share</h1>
             <p>Read-only snapshot for local network collaboration.</p>
             <ul>
-              <li><a href="/journal">Journal entries</a></li>
-              <li><a href="/bibliography">Bibliography</a></li>
-              <li><a href="/health">Health</a></li>
+              <li>Journal entries</li>
+              <li>Bibliography</li>
+              <li>Health</li>
             </ul>
             "#,
         )),
-        "/health" => Ok(page_shell("health", "<p>ok</p>")),
+        "/health" => Ok(page_shell("health", token, "<p>ok</p>")),
         "/journal" => {
             let mut stmt = conn
                 .prepare(
@@ -161,7 +182,7 @@ fn render_page(db_path: &std::path::Path, url: &str) -> AppResult<String> {
                     esc(&body)
                 ));
             }
-            Ok(page_shell("Journal", &html))
+            Ok(page_shell("Journal", token, &html))
         }
         "/bibliography" => {
             let mut stmt = conn
@@ -197,9 +218,9 @@ fn render_page(db_path: &std::path::Path, url: &str) -> AppResult<String> {
                 ));
             }
             html.push_str("</ol>");
-            Ok(page_shell("Bibliography", &html))
+            Ok(page_shell("Bibliography", token, &html))
         }
-        _ => Ok(page_shell("404", "<p>Not found. <a href=\"/\">Home</a></p>")),
+        _ => Ok(page_shell("404", token, "<p>Not found.</p>")),
     }
 }
 
@@ -210,7 +231,7 @@ fn esc(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
-fn page_shell(title: &str, body: &str) -> String {
+fn page_shell(title: &str, token: &str, body: &str) -> String {
     format!(
         r#"<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"/><title>{title}</title>
@@ -221,9 +242,39 @@ fn page_shell(title: &str, body: &str) -> String {
  article{{border-bottom:1px solid #ddd;padding:1rem 0}}
  a{{color:#2f6fed}}
 </style></head><body>
-<nav><a href="/">Home</a> · <a href="/journal">Journal</a> · <a href="/bibliography">Bibliography</a></nav>
+<nav><a href="/?token={token}">Home</a> · <a href="/journal?token={token}">Journal</a> · <a href="/bibliography?token={token}">Bibliography</a></nav>
 {body}
 </body></html>"#
     )
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extracts_only_explicit_token_parameter() {
+        assert_eq!(request_token("/?token=secret"), Some("secret"));
+        assert_eq!(
+            request_token("/journal?view=full&token=secret"),
+            Some("secret")
+        );
+        assert_eq!(request_token("/?not_token=secret"), None);
+        assert_eq!(request_token("/journal"), None);
+    }
+
+    #[test]
+    fn html_escapes_untrusted_content() {
+        assert_eq!(
+            esc(r#"<script x="1">&"#),
+            "&lt;script x=&quot;1&quot;&gt;&amp;"
+        );
+    }
+
+    #[test]
+    fn navigation_keeps_access_token() {
+        let html = page_shell("title", "abc123", "body");
+        assert!(html.contains("/journal?token=abc123"));
+        assert!(html.contains("/bibliography?token=abc123"));
+    }
+}

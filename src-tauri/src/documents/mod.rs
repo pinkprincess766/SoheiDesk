@@ -37,20 +37,6 @@ impl DocType {
         }
     }
 
-    pub fn is_reflow(&self) -> bool {
-        matches!(
-            self,
-            DocType::Md
-                | DocType::Txt
-                | DocType::Docx
-                | DocType::Epub
-                | DocType::Html
-                | DocType::Tex
-                | DocType::Fb2
-                | DocType::Djvu
-        )
-    }
-
     pub fn from_path(path: &Path) -> AppResult<Self> {
         let ext = path
             .extension()

@@ -60,25 +60,14 @@ fn find_djvutxt() -> Option<PathBuf> {
             return Some(p);
         }
     }
-    // `command -v` via sh
-    let out = Command::new("/bin/sh")
-        .args(["-c", "command -v djvutxt"])
-        .output()
-        .ok()?;
-    if out.status.success() {
-        let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if !s.is_empty() {
-            return Some(PathBuf::from(s));
-        }
-    }
     None
 }
 
 fn which_exists(bin: &str) -> bool {
-    Command::new("/bin/sh")
-        .args(["-c", &format!("command -v {bin} >/dev/null 2>&1")])
-        .status()
-        .map(|s| s.success())
+    Command::new(bin)
+        .arg("--help")
+        .output()
+        .map(|_| true)
         .unwrap_or(false)
 }
 

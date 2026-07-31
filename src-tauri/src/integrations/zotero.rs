@@ -65,11 +65,11 @@ pub fn list_items(zotero_db_path: &str, limit: usize) -> AppResult<Vec<ZoteroIte
         LIMIT ?1
     "#;
 
-    let mut stmt = conn
-        .prepare(sql)
-        .map_err(|e| AppError::Message(format!(
+    let mut stmt = conn.prepare(sql).map_err(|e| {
+        AppError::Message(format!(
             "Zotero schema query failed (is this a Zotero 5/6/7 database?): {e}"
-        )))?;
+        ))
+    })?;
 
     let rows = stmt
         .query_map([limit as i64], |row| {
@@ -164,7 +164,10 @@ pub fn import_attachments(
         // only supported types
         if library::open_and_register(db, path).is_ok() {
             if let Ok(list) = library::list_documents(db) {
-                if let Some(doc) = list.into_iter().find(|d| d.last_path.as_deref() == Some(&p)) {
+                if let Some(doc) = list
+                    .into_iter()
+                    .find(|d| d.last_path.as_deref() == Some(&p))
+                {
                     out.push(doc);
                     continue;
                 }

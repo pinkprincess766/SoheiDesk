@@ -5,6 +5,7 @@ use crate::error::{AppError, AppResult};
 use chrono::Utc;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
+use std::net::IpAddr;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,6 +56,47 @@ fn map_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<RssItem> {
     })
 }
 
+fn validate_feed_url(raw: &str) -> AppResult<reqwest::Url> {
+    let url = reqwest::Url::parse(raw.trim())
+        .map_err(|_| AppError::Message("invalid feed URL".into()))?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err(AppError::Message("feed URL must use HTTP or HTTPS".into()));
+    }
+    let host = url
+        .host_str()
+        .ok_or_else(|| AppError::Message("feed URL has no host".into()))?;
+    if host.eq_ignore_ascii_case("localhost") || host.ends_with(".localhost") {
+        return Err(AppError::Message(
+            "local network feed URLs are blocked".into(),
+        ));
+    }
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        let blocked = match ip {
+            IpAddr::V4(ip) => {
+                ip.is_private()
+                    || ip.is_loopback()
+                    || ip.is_link_local()
+                    || ip.is_broadcast()
+                    || ip.is_multicast()
+                    || ip.is_unspecified()
+            }
+            IpAddr::V6(ip) => {
+                ip.is_loopback()
+                    || ip.is_unspecified()
+                    || ip.is_unique_local()
+                    || ip.is_unicast_link_local()
+                    || ip.is_multicast()
+            }
+        };
+        if blocked {
+            return Err(AppError::Message(
+                "local network feed URLs are blocked".into(),
+            ));
+        }
+    }
+    Ok(url)
+}
+
 pub fn list_feeds(db: &DbState) -> AppResult<Vec<RssFeed>> {
     with_conn(db, |conn| {
         let mut stmt = conn.prepare(
@@ -78,6 +120,7 @@ pub fn add_feed(
     if url.trim().is_empty() {
         return Err(AppError::Message("feed URL required".into()));
     }
+    let url = validate_feed_url(&url)?.to_string();
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
     let title = if title.trim().is_empty() {
@@ -223,8 +266,7 @@ fn parse_feed_xml(xml: &str) -> Vec<ParsedItem> {
                 .or_else(|| link.clone())
                 .unwrap_or_else(|| title.clone());
             let summary = extract_tag(body, "summary").or_else(|| extract_tag(body, "content"));
-            let published =
-                extract_tag(body, "published").or_else(|| extract_tag(body, "updated"));
+            let published = extract_tag(body, "published").or_else(|| extract_tag(body, "updated"));
             items.push(ParsedItem {
                 guid,
                 title,
@@ -242,10 +284,11 @@ pub fn fetch_feed(db: &DbState, feed_id: &str) -> AppResult<usize> {
     let client = reqwest::blocking::Client::builder()
         .user_agent("SoheiDesk/0.4 RSS reader")
         .timeout(std::time::Duration::from_secs(25))
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|e| AppError::Message(format!("http: {e}")))?;
     let text = client
-        .get(&feed.url)
+        .get(validate_feed_url(&feed.url)?)
         .send()
         .map_err(|e| AppError::Message(format!("fetch feed: {e}")))?
         .text()
@@ -310,19 +353,18 @@ pub fn fetch_all(db: &DbState) -> AppResult<usize> {
     Ok(total)
 }
 
-pub fn seed_example_feeds(db: &DbState) -> AppResult<()> {
-    let count: i64 = with_conn(db, |conn| {
-        Ok(conn.query_row("SELECT COUNT(*) FROM rss_feeds", [], |r| r.get(0))?)
-    })?;
-    if count > 0 {
-        return Ok(());
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn feed_url_rejects_local_and_non_http_targets() {
+        assert!(validate_feed_url("file:///etc/passwd").is_err());
+        assert!(validate_feed_url("http://localhost:8080/feed").is_err());
+        assert!(validate_feed_url("http://127.0.0.1/feed").is_err());
+        assert!(validate_feed_url("http://192.168.1.4/feed").is_err());
+        assert!(validate_feed_url("https://example.com/feed.xml").is_ok());
+    }
 
     #[test]
     fn parse_rss_item() {

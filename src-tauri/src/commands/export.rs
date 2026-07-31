@@ -1,8 +1,6 @@
 use crate::db::DbState;
 use crate::error::AppResult;
-use crate::export::{
-    self, ExportTemplate, ExportTemplateInput, MultiExportPreview,
-};
+use crate::export::{self, ExportTemplate, ExportTemplateInput, MultiExportPreview};
 use tauri::State;
 
 #[tauri::command]
@@ -45,18 +43,11 @@ pub fn export_entry_formatted(
     author: Option<String>,
     project: Option<String>,
 ) -> AppResult<()> {
-    export::export_entry_to_path(
-        &db,
-        &entry_id,
-        &format,
-        &path,
-        template_id,
-        author,
-        project,
-    )
+    export::export_entry_to_path(&db, &entry_id, &format, &path, template_id, author, project)
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn preview_period_export(
     db: State<'_, DbState>,
     from_date: String,
@@ -82,6 +73,7 @@ pub fn preview_period_export(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn export_period_formatted(
     db: State<'_, DbState>,
     from_date: String,

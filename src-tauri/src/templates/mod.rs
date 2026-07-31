@@ -62,7 +62,10 @@ pub fn validate_fields(fields: &[TemplateField]) -> AppResult<()> {
             )));
         }
         if !keys.insert(f.key.clone()) {
-            return Err(AppError::Message(format!("duplicate field key '{}'", f.key)));
+            return Err(AppError::Message(format!(
+                "duplicate field key '{}'",
+                f.key
+            )));
         }
     }
     Ok(())
@@ -70,10 +73,11 @@ pub fn validate_fields(fields: &[TemplateField]) -> AppResult<()> {
 
 pub fn seed_builtins(db: &DbState) -> AppResult<()> {
     with_conn(db, |conn| {
-        let count: i64 =
-            conn.query_row("SELECT COUNT(*) FROM templates WHERE is_builtin = 1", [], |r| {
-                r.get(0)
-            })?;
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM templates WHERE is_builtin = 1",
+            [],
+            |r| r.get(0),
+        )?;
         if count > 0 {
             return Ok(());
         }

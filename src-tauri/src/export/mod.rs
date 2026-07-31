@@ -39,16 +39,6 @@ impl ExportFormat {
             other => Err(AppError::Message(format!("unknown export format: {other}"))),
         }
     }
-
-    pub fn extension(&self) -> &'static str {
-        match self {
-            ExportFormat::Markdown => "md",
-            ExportFormat::Typst => "typ",
-            ExportFormat::Latex => "tex",
-            ExportFormat::Html => "html",
-            ExportFormat::Docx => "docx",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -127,7 +117,7 @@ enum Block {
 
 fn parse_md_blocks(md: &str) -> Vec<Block> {
     let mut blocks = Vec::new();
-    let mut lines = md.lines().peekable();
+    let lines = md.lines();
     let mut in_code = false;
     let mut code_buf = String::new();
     let mut list_buf: Vec<String> = Vec::new();
@@ -138,7 +128,7 @@ fn parse_md_blocks(md: &str) -> Vec<Block> {
         }
     };
 
-    while let Some(line) = lines.next() {
+    for line in lines {
         if line.starts_with("```") {
             flush_list(&mut blocks, &mut list_buf);
             if in_code {
@@ -166,7 +156,11 @@ fn parse_md_blocks(md: &str) -> Vec<Block> {
             blocks.push(Block::Formula(trimmed.trim_matches('$').to_string()));
             continue;
         }
-        if trimmed.starts_with('$') && trimmed.ends_with('$') && trimmed.len() > 2 && !trimmed[1..].contains('$') {
+        if trimmed.starts_with('$')
+            && trimmed.ends_with('$')
+            && trimmed.len() > 2
+            && !trimmed[1..].contains('$')
+        {
             flush_list(&mut blocks, &mut list_buf);
             blocks.push(Block::Formula(trimmed.trim_matches('$').to_string()));
             continue;
@@ -181,7 +175,10 @@ fn parse_md_blocks(md: &str) -> Vec<Block> {
         } else if let Some(rest) = trimmed.strip_prefix("# ") {
             flush_list(&mut blocks, &mut list_buf);
             blocks.push(Block::H1(rest.to_string()));
-        } else if let Some(rest) = trimmed.strip_prefix("- ").or_else(|| trimmed.strip_prefix("* ")) {
+        } else if let Some(rest) = trimmed
+            .strip_prefix("- ")
+            .or_else(|| trimmed.strip_prefix("* "))
+        {
             list_buf.push(rest.to_string());
         } else {
             flush_list(&mut blocks, &mut list_buf);
@@ -263,12 +260,10 @@ fn md_to_html_body(md: &str) -> String {
             Block::Code(c) => {
                 out.push_str(&format!("<pre><code>{}</code></pre>\n", html_escape(&c)))
             }
-            Block::Formula(f) => {
-                out.push_str(&format!(
-                    "<div class=\"formula\">\\[{}\\]</div>\n",
-                    html_escape(&f)
-                ))
-            }
+            Block::Formula(f) => out.push_str(&format!(
+                "<div class=\"formula\">\\[{}\\]</div>\n",
+                html_escape(&f)
+            )),
         }
     }
     out
@@ -406,10 +401,30 @@ pub fn seed_export_templates(db: &DbState) -> AppResult<()> {
         }
         let now = Utc::now().to_rfc3339();
         let seeds = [
-            ("exp-md-default", "Markdown default", "markdown", default_template(&ExportFormat::Markdown)),
-            ("exp-typst-default", "Typst default", "typst", default_template(&ExportFormat::Typst)),
-            ("exp-latex-default", "LaTeX default", "latex", default_template(&ExportFormat::Latex)),
-            ("exp-html-default", "HTML default", "html", default_template(&ExportFormat::Html)),
+            (
+                "exp-md-default",
+                "Markdown default",
+                "markdown",
+                default_template(&ExportFormat::Markdown),
+            ),
+            (
+                "exp-typst-default",
+                "Typst default",
+                "typst",
+                default_template(&ExportFormat::Typst),
+            ),
+            (
+                "exp-latex-default",
+                "LaTeX default",
+                "latex",
+                default_template(&ExportFormat::Latex),
+            ),
+            (
+                "exp-html-default",
+                "HTML default",
+                "html",
+                default_template(&ExportFormat::Html),
+            ),
             (
                 "exp-typst-report",
                 "Typst lab report",
@@ -510,7 +525,10 @@ pub struct ExportTemplateInput {
     pub body: String,
 }
 
-pub fn create_export_template(db: &DbState, input: ExportTemplateInput) -> AppResult<ExportTemplate> {
+pub fn create_export_template(
+    db: &DbState,
+    input: ExportTemplateInput,
+) -> AppResult<ExportTemplate> {
     ExportFormat::from_str(&input.format)?;
     if input.name.trim().is_empty() {
         return Err(AppError::Message("name required".into()));
@@ -538,7 +556,9 @@ pub fn create_export_template(db: &DbState, input: ExportTemplateInput) -> AppRe
 pub fn delete_export_template(db: &DbState, id: &str) -> AppResult<()> {
     let t = get_export_template(db, id)?;
     if t.is_builtin {
-        return Err(AppError::Message("cannot delete builtin export template".into()));
+        return Err(AppError::Message(
+            "cannot delete builtin export template".into(),
+        ));
     }
     with_conn(db, |conn| {
         conn.execute("DELETE FROM export_templates WHERE id = ?1", params![id])?;
@@ -731,6 +751,7 @@ pub fn preview_entry_export(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn preview_period_export(
     db: &DbState,
     from_date: &str,
@@ -826,8 +847,7 @@ pub fn write_simple_docx(path: &str, title: &str, body_text: &str) -> AppResult<
   </w:body>
 </w:document>"#
     );
-    zip.start_file("word/document.xml", opts)
-        .map_err(map_zip)?;
+    zip.start_file("word/document.xml", opts).map_err(map_zip)?;
     zip.write_all(document.as_bytes())?;
     zip.finish().map_err(map_zip)?;
     Ok(())
@@ -867,6 +887,7 @@ pub fn export_entry_to_path(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn export_period_to_path(
     db: &DbState,
     from_date: &str,

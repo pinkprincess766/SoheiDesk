@@ -146,7 +146,7 @@ impl SearchState {
             .parse_query(query)
             .map_err(|e| AppError::Message(format!("bad query: {e}")))?;
         let top = searcher
-            .search(&q, &TopDocs::with_limit(limit.max(1).min(100)))
+            .search(&q, &TopDocs::with_limit(limit.clamp(1, 100)))
             .map_err(|e| AppError::Message(format!("search: {e}")))?;
 
         let mut hits = Vec::new();
@@ -188,8 +188,7 @@ impl SearchState {
         let mut count = 0u64;
 
         let docs: Vec<(String, String, Option<String>, String)> = with_conn(db, |conn| {
-            let mut stmt =
-                conn.prepare("SELECT id, title, last_path, doc_type FROM documents")?;
+            let mut stmt = conn.prepare("SELECT id, title, last_path, doc_type FROM documents")?;
             let rows = stmt.query_map([], |row| {
                 Ok((
                     row.get(0)?,

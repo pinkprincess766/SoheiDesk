@@ -11,8 +11,8 @@ use zip::ZipArchive;
 /// Images written under `media_dir` as files and linked via `sohei-file://{abs}` when possible.
 pub fn extract_text(path: &Path, media_dir: Option<&Path>) -> AppResult<String> {
     let file = std::fs::File::open(path)?;
-    let mut archive = ZipArchive::new(file)
-        .map_err(|e| AppError::Message(format!("invalid docx/zip: {e}")))?;
+    let mut archive =
+        ZipArchive::new(file).map_err(|e| AppError::Message(format!("invalid docx/zip: {e}")))?;
 
     let rels = read_document_rels(&mut archive)?;
     if let Some(dir) = media_dir {
@@ -114,8 +114,6 @@ fn normalize_zip_path(target: &str) -> String {
         t.trim_start_matches('/').to_string()
     } else if let Some(rest) = t.strip_prefix("../") {
         format!("word/{rest}")
-    } else if t.starts_with("media/") || t.starts_with("embeddings/") {
-        format!("word/{t}")
     } else {
         format!("word/{t}")
     }
@@ -259,11 +257,7 @@ fn collect_embed_attrs(e: &quick_xml::events::BytesStart<'_>, pending: &mut Vec<
     }
 }
 
-fn flush_embeds(
-    out: &mut String,
-    pending: &mut Vec<String>,
-    images: &HashMap<String, String>,
-) {
+fn flush_embeds(out: &mut String, pending: &mut Vec<String>, images: &HashMap<String, String>) {
     if pending.is_empty() {
         return;
     }
@@ -315,10 +309,7 @@ mod tests {
           </w:body>
         </w:document>"#;
         let mut imgs = HashMap::new();
-        imgs.insert(
-            "rId5".into(),
-            "![image](data:image/png;base64,aaa)".into(),
-        );
+        imgs.insert("rId5".into(), "![image](data:image/png;base64,aaa)".into());
         let t = xml_to_markdown(xml, &imgs);
         assert!(t.contains("Before"));
         assert!(t.contains("data:image/png;base64,aaa"));

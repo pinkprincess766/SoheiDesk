@@ -20,7 +20,9 @@ mod templates;
 use collab::CollabState;
 use pending_open::PendingOpen;
 use search::SearchState;
-use tauri::{Emitter, Manager};
+#[cfg(target_os = "macos")]
+use tauri::Emitter;
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

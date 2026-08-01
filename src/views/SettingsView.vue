@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { confirm } from "@tauri-apps/plugin-dialog";
 import { useAppStore } from "../stores/app";
 import { useUiModeStore } from "../stores/uiMode";
+import type { BackupInfo, BackupKind, BackupRestoreResult } from "../types";
 
 interface CollabStatus {
   running: boolean;
@@ -18,6 +20,10 @@ const saved = ref(false);
 const collab = ref<CollabStatus | null>(null);
 const collabPort = ref(8765);
 const collabBusy = ref(false);
+const backups = ref<BackupInfo[]>([]);
+const backupsVisible = ref(false);
+const backupBusy = ref(false);
+const backupMessage = ref("");
 
 onMounted(async () => {
   await app.loadInfo();
@@ -59,6 +65,89 @@ async function stopCollab() {
     app.setError(String(e));
   } finally {
     collabBusy.value = false;
+  }
+}
+
+function backupKindLabel(kind: BackupKind) {
+  return {
+    daily: "Ежедневная",
+    manual: "Ручная",
+    pre_migration: "Перед миграцией",
+    emergency: "Аварийная",
+    unknown: "Неизвестная",
+  }[kind];
+}
+
+function formatBackupDate(value: string) {
+  if (!value) return "дата неизвестна";
+  const date = new Date(value);
+  return Number.isNaN(date.valueOf()) ? value : new Intl.DateTimeFormat("ru-RU", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
+function formatBytes(value: number) {
+  if (value < 1024) return `${value} Б`;
+  if (value < 1024 ** 2) return `${(value / 1024).toFixed(1)} КБ`;
+  if (value < 1024 ** 3) return `${(value / 1024 ** 2).toFixed(1)} МБ`;
+  return `${(value / 1024 ** 3).toFixed(1)} ГБ`;
+}
+
+async function loadBackups() {
+  backups.value = await invoke<BackupInfo[]>("list_backups");
+}
+
+async function toggleBackups() {
+  backupsVisible.value = !backupsVisible.value;
+  if (!backupsVisible.value) return;
+  backupBusy.value = true;
+  backupMessage.value = "";
+  try {
+    await loadBackups();
+  } catch (e) {
+    app.setError(String(e));
+  } finally {
+    backupBusy.value = false;
+  }
+}
+
+async function createBackup() {
+  backupBusy.value = true;
+  backupMessage.value = "Создаём и проверяем копию…";
+  try {
+    const created = await invoke<BackupInfo>("create_backup");
+    backupMessage.value = `Копия создана и проверена: ${created.file_name}`;
+    if (backupsVisible.value) await loadBackups();
+  } catch (e) {
+    backupMessage.value = "";
+    app.setError(String(e));
+  } finally {
+    backupBusy.value = false;
+  }
+}
+
+async function restoreBackup(backup: BackupInfo) {
+  if (!backup.readable) return;
+  const approved = await confirm(
+    `Восстановить данные из копии «${backup.file_name}»?\n\nТекущие данные сначала будут сохранены в аварийную копию.`,
+    { title: "Восстановление SoheiDesk", kind: "warning" },
+  );
+  if (!approved) return;
+
+  backupBusy.value = true;
+  backupMessage.value = "Проверяем хеши и целостность SQLite…";
+  try {
+    const result = await invoke<BackupRestoreResult>("restore_backup", { backupId: backup.id });
+    backupMessage.value = result.warning
+      ? `Данные восстановлены. ${result.warning}`
+      : `Данные восстановлены. Аварийная копия: ${result.emergency.file_name}. Перезапуск…`;
+    window.setTimeout(() => window.location.reload(), 1400);
+  } catch (e) {
+    backupMessage.value = "Восстановление отменено или откат выполнен.";
+    app.setError(String(e));
+  } finally {
+    backupBusy.value = false;
   }
 }
 </script>
@@ -107,6 +196,54 @@ async function stopCollab() {
             Обычный
           </button>
           <button class="btn" @click="ui.resetMode()">Спросить при запуске</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 style="margin: 0 0 8px">Резервные копии</h3>
+        <p class="muted" style="margin: 0 0 10px; font-size: 0.9rem">
+          SoheiDesk делает копию раз в сутки и перед миграциями. Хранятся 7 последних дневных и
+          4 более старые недельные копии. Ручные и аварийные копии автоматически не удаляются.
+        </p>
+        <div class="toolbar">
+          <button class="btn btn-primary" :disabled="backupBusy" @click="createBackup">
+            Создать копию
+          </button>
+          <button class="btn" :disabled="backupBusy" @click="toggleBackups">
+            {{ backupsVisible ? "Скрыть копии" : "Показать копии" }}
+          </button>
+        </div>
+        <p v-if="backupMessage" style="margin: 10px 0 0; font-size: 0.88rem">
+          {{ backupMessage }}
+        </p>
+        <p class="muted" style="margin: 10px 0 0; font-size: 0.8rem">
+          Перед восстановлением автоматически проверяются SHA-256 всех файлов и SQLite integrity_check.
+          Поисковый индекс не копируется — он пересоздаётся после восстановления.
+        </p>
+
+        <div v-if="backupsVisible" class="backup-list">
+          <p v-if="backupBusy && backups.length === 0" class="muted">Загрузка…</p>
+          <p v-else-if="backups.length === 0" class="muted">Копий пока нет.</p>
+          <div v-for="backup in backups" :key="`${backup.file_name}-${backup.id}`" class="backup-row">
+            <div style="min-width: 0; flex: 1">
+              <strong>{{ backupKindLabel(backup.kind) }}</strong>
+              <div class="muted backup-meta">
+                {{ formatBackupDate(backup.created_at) }} · {{ formatBytes(backup.size_bytes) }}
+                <template v-if="backup.schema_version >= 0"> · DB v{{ backup.schema_version }}</template>
+              </div>
+              <div class="muted backup-file">{{ backup.file_name }}</div>
+              <div v-if="!backup.readable" class="backup-error">
+                Архив повреждён или имеет неизвестный формат: {{ backup.error }}
+              </div>
+            </div>
+            <button
+              class="btn"
+              :disabled="backupBusy || !backup.readable"
+              @click="restoreBackup(backup)"
+            >
+              Восстановить
+            </button>
+          </div>
         </div>
       </div>
 
@@ -179,5 +316,37 @@ kbd {
   border-radius: 4px;
   padding: 1px 5px;
   background: var(--bg);
+}
+.backup-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+.backup-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.backup-meta {
+  margin-top: 3px;
+  font-size: 0.82rem;
+}
+.backup-file {
+  overflow: hidden;
+  margin-top: 3px;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.backup-error {
+  margin-top: 5px;
+  color: var(--danger, #c2413b);
+  font-size: 0.8rem;
 }
 </style>

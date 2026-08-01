@@ -15,6 +15,7 @@ const ui = useUiModeStore();
 const router = useRouter();
 
 let unlistenOpen: UnlistenFn | null = null;
+let unlistenBackupError: UnlistenFn | null = null;
 
 function isMod(e: KeyboardEvent) {
   return e.metaKey || e.ctrlKey;
@@ -69,7 +70,7 @@ async function openPathsForReading(paths: string[]) {
 
 onMounted(async () => {
   applyTheme(app.theme);
-  await app.loadInfo();
+  await Promise.all([app.loadInfo(), ui.hydrate()]);
   window.addEventListener("keydown", onKey);
 
   try {
@@ -85,6 +86,14 @@ onMounted(async () => {
     unlistenOpen = await listen<string[]>("open-paths", async (ev) => {
       if (ui.needsPicker) return;
       await openPathsForReading(ev.payload || []);
+    });
+  } catch {
+    /* */
+  }
+
+  try {
+    unlistenBackupError = await listen<string>("backup-error", (ev) => {
+      app.setError(`Не удалось создать ежедневную резервную копию: ${ev.payload}`);
     });
   } catch {
     /* */
@@ -108,6 +117,7 @@ watch(
 onUnmounted(() => {
   window.removeEventListener("keydown", onKey);
   unlistenOpen?.();
+  unlistenBackupError?.();
 });
 </script>
 

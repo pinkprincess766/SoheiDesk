@@ -34,6 +34,7 @@ required.
 | Annotations | Highlights, comments, freehand strokes, rectangles, ellipses, and arrows |
 | Journal | Built-in and custom templates, attachments, preview, and export |
 | Draft safety | Journal and template drafts are autosaved to SQLite and can be restored explicitly |
+| Backups | Daily, pre-migration, and manual backups with verified restore and an automatic emergency copy |
 | Library and search | Local document history plus full-text search across documents and journal entries |
 | Export | Markdown, HTML, Typst, LaTeX, and DOCX output |
 | References | DOI lookup, arXiv/PubMed search, bibliography export, and read-only Zotero import |
@@ -107,10 +108,23 @@ not supported at the moment.
   installed on the computer.
 - LAN sharing is optional and intended for a trusted local network, not the
   public internet.
+- Backups are stored under `backups` in the application data directory. A
+  backup contains the main SQLite database, app-managed media and attachments,
+  settings, user templates, and a versioned checksum manifest. The rebuildable
+  search index is intentionally excluded.
+
+When SoheiDesk is running, it creates at most one automatic backup per local
+day and keeps 7 daily plus 4 older weekly copies. It also creates a backup
+before each database migration and an emergency copy before restore. Manual
+creation, backup history, and restore are available in **Settings**. Every
+restore verifies all SHA-256 checksums and runs SQLite `integrity_check` before
+current data is changed. The archive layout is documented in
+[docs/backup-format.md](./docs/backup-format.md).
 
 SoheiDesk is under active development and is not a validated electronic
-laboratory notebook. Keep normal backups of important source documents and
-application data.
+laboratory notebook. Source documents opened from locations outside the app
+data directory are not guaranteed to be copied into a SoheiDesk backup; keep
+normal backups of those originals as well.
 
 ## Build from source
 

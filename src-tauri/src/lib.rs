@@ -1,4 +1,5 @@
 mod annotations;
+mod backup;
 mod collab;
 mod commands;
 mod db;
@@ -17,6 +18,7 @@ mod rss;
 mod search;
 mod templates;
 
+use backup::BackupState;
 use collab::CollabState;
 use pending_open::PendingOpen;
 use search::SearchState;
@@ -43,6 +45,8 @@ pub fn run() {
             app.manage(CollabState::default());
             app.manage(search);
             app.manage(state);
+            app.manage(BackupState::default());
+            backup::start_scheduler(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -51,6 +55,10 @@ pub fn run() {
             commands::quit_app,
             commands::get_setting,
             commands::set_setting,
+            commands::delete_setting,
+            commands::create_backup,
+            commands::list_backups,
+            commands::restore_backup,
             commands::open_document_path,
             commands::list_documents,
             commands::remove_document,

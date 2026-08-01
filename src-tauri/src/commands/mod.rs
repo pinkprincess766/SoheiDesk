@@ -1,5 +1,6 @@
 mod annotations;
 mod app;
+mod backup;
 mod collab;
 mod documents;
 mod export;
@@ -16,6 +17,7 @@ mod zotero;
 
 pub use annotations::*;
 pub use app::*;
+pub use backup::*;
 pub use collab::*;
 pub use documents::*;
 pub use export::*;

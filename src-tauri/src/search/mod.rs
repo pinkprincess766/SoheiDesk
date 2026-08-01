@@ -184,6 +184,7 @@ impl SearchState {
         writer
             .commit()
             .map_err(|e| AppError::Message(format!("tantivy commit: {e}")))?;
+        drop(writer);
 
         let mut count = 0u64;
 

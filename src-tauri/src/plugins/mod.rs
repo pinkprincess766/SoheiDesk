@@ -285,6 +285,7 @@ mod tests {
         (
             DbState {
                 conn: Mutex::new(conn),
+                media: Mutex::new(()),
                 data_dir: std::env::temp_dir(),
             },
             path,

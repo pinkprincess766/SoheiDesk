@@ -150,30 +150,55 @@ const MIGRATIONS: &[&str] = &[
     "#,
 ];
 
-pub fn apply(conn: &Connection) -> AppResult<()> {
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS schema_migrations (
-            version INTEGER PRIMARY KEY,
-            applied_at TEXT NOT NULL
-        );",
-    )?;
-
-    let current: i64 = conn.query_row(
-        "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
+pub fn current_version(conn: &Connection) -> AppResult<i64> {
+    let exists: bool = conn.query_row(
+        "SELECT EXISTS(
+            SELECT 1 FROM sqlite_master
+            WHERE type='table' AND name='schema_migrations'
+        )",
         [],
         |row| row.get(0),
     )?;
+    if !exists {
+        return Ok(0);
+    }
+
+    Ok(conn.query_row(
+        "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
+        [],
+        |row| row.get(0),
+    )?)
+}
+
+pub fn latest_version() -> i64 {
+    MIGRATIONS.len() as i64
+}
+
+#[cfg(test)]
+pub fn apply(conn: &Connection) -> AppResult<()> {
+    apply_with_hook(conn, |_, _, _| Ok(()))
+}
+
+pub fn apply_with_hook<F>(conn: &Connection, mut before_migration: F) -> AppResult<()>
+where
+    F: FnMut(&Connection, i64, i64) -> AppResult<()>,
+{
+    let mut current = current_version(conn)?;
 
     for (idx, sql) in MIGRATIONS.iter().enumerate() {
         let version = (idx + 1) as i64;
         if version <= current {
             continue;
         }
+        if current > 0 {
+            before_migration(conn, current, version)?;
+        }
         conn.execute_batch(sql)?;
         conn.execute(
             "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, ?2)",
             rusqlite::params![version, chrono::Utc::now().to_rfc3339()],
         )?;
+        current = version;
     }
 
     Ok(())
@@ -212,5 +237,27 @@ mod tests {
             .expect("draft table");
         assert_eq!(version, 4);
         assert_eq!(draft_table, 1);
+    }
+
+    #[test]
+    fn invokes_backup_hook_before_pending_migration() {
+        let conn = Connection::open_in_memory().expect("database");
+        conn.execute_batch(
+            "CREATE TABLE schema_migrations (
+                version INTEGER PRIMARY KEY,
+                applied_at TEXT NOT NULL
+             );
+             INSERT INTO schema_migrations(version, applied_at)
+             VALUES (1, 't'), (2, 't'), (3, 't');",
+        )
+        .expect("v3 schema marker");
+
+        let mut calls = Vec::new();
+        apply_with_hook(&conn, |_, from, to| {
+            calls.push((from, to));
+            Ok(())
+        })
+        .expect("migration with hook");
+        assert_eq!(calls, vec![(3, 4)]);
     }
 }

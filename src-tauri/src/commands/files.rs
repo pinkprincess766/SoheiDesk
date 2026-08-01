@@ -192,6 +192,7 @@ mod tests {
     fn state_at(path: PathBuf) -> DbState {
         DbState {
             conn: Mutex::new(Connection::open_in_memory().expect("in-memory database")),
+            media: Mutex::new(()),
             data_dir: path,
         }
     }

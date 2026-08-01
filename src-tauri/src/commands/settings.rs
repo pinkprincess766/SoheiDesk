@@ -27,3 +27,11 @@ pub fn set_setting(db: State<'_, DbState>, key: String, value: String) -> AppRes
         Ok(())
     })
 }
+
+#[tauri::command]
+pub fn delete_setting(db: State<'_, DbState>, key: String) -> AppResult<()> {
+    with_conn(&db, |conn| {
+        conn.execute("DELETE FROM settings WHERE key = ?1", params![key])?;
+        Ok(())
+    })
+}

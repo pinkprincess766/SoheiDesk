@@ -55,6 +55,11 @@ pub fn list_documents(db: &DbState) -> AppResult<Vec<DocumentRecord>> {
 
 /// Open a user-selected path: compute content_hash, upsert library row, return payload.
 pub fn open_and_register(db: &DbState, path: &Path) -> AppResult<OpenResult> {
+    // Keep media materialization and the matching DB row atomic with respect to backups.
+    let _media = db
+        .media
+        .lock()
+        .map_err(|_| AppError::Message("media lock poisoned".into()))?;
     // Pre-hash for cache dir (open_document hashes again — cheap for head/tail hash)
     let (content_hash, _) = documents::content_hash(path)?;
     let cache_dir = db.data_dir.join("media").join(&content_hash);

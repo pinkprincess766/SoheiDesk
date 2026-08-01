@@ -10,7 +10,9 @@ use std::path::Path;
 pub fn extract_text(path: &Path) -> AppResult<String> {
     let file = File::open(path)?;
     let mut reader = Reader::from_reader(BufReader::new(file));
-    reader.config_mut().trim_text(true);
+    // References are emitted as separate events in quick-xml 0.41, so surrounding
+    // whitespace must be preserved until the fragments are joined.
+    reader.config_mut().trim_text(false);
 
     let mut out = String::new();
     let mut buf = Vec::new();
@@ -84,9 +86,8 @@ pub fn extract_text(path: &Path) -> AppResult<String> {
                     buf.clear();
                     continue;
                 }
-                if let Ok(s) = t.unescape() {
-                    let s = s.trim();
-                    if s.is_empty() {
+                if let Ok(decoded) = t.decode() {
+                    if decoded.trim().is_empty() {
                         buf.clear();
                         continue;
                     }
@@ -94,12 +95,19 @@ pub fn extract_text(path: &Path) -> AppResult<String> {
                         if out.is_empty() {
                             out.push_str("# ");
                         }
-                        out.push_str(s);
-                        out.push(' ');
+                        out.push_str(&decoded);
                     } else if in_body && (in_p || in_v || tag_stack.iter().any(|t| t == "title")) {
-                        out.push_str(s);
-                        out.push(' ');
+                        out.push_str(&decoded);
                     }
+                }
+            }
+            Ok(Event::GeneralRef(reference)) => {
+                if !skip_binary
+                    && (in_title
+                        || (in_body
+                            && (in_p || in_v || tag_stack.iter().any(|tag| tag == "title"))))
+                {
+                    push_xml_reference(&mut out, &reference);
                 }
             }
             Ok(Event::CData(t)) => {
@@ -131,4 +139,45 @@ pub fn extract_text(path: &Path) -> AppResult<String> {
         ));
     }
     Ok(cleaned)
+}
+
+fn push_xml_reference(out: &mut String, reference: &quick_xml::events::BytesRef<'_>) {
+    if let Ok(Some(character)) = reference.resolve_char_ref() {
+        out.push(character);
+    } else if let Ok(name) = reference.decode() {
+        if let Some(value) = quick_xml::escape::resolve_xml_entity(&name) {
+            out.push_str(value);
+        } else {
+            // Preserve unknown named entities without expanding untrusted DTD content.
+            out.push('&');
+            out.push_str(&name);
+            out.push(';');
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decodes_xml_entities() {
+        let path = std::env::temp_dir().join(format!("soheidesk-{}.fb2", uuid::Uuid::new_v4()));
+        std::fs::write(
+            &path,
+            r#"<?xml version="1.0" encoding="utf-8"?>
+            <FictionBook><description><title-info><book-title>A &amp; B</book-title></title-info></description>
+            <body><section><p>Research &amp; development</p></section></body></FictionBook>"#,
+        )
+        .expect("write FB2 fixture");
+
+        let text = extract_text(&path).expect("extract FB2 fixture");
+        let _ = std::fs::remove_file(path);
+
+        assert!(text.contains("A & B"), "unexpected title: {text:?}");
+        assert!(
+            text.contains("Research & development"),
+            "unexpected body: {text:?}"
+        );
+    }
 }

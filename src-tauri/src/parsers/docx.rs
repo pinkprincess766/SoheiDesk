@@ -212,8 +212,20 @@ fn xml_to_markdown(xml: &str, images: &HashMap<String, String>) -> String {
             }
             Ok(Event::Text(ref t)) => {
                 if in_t {
-                    if let Ok(s) = t.unescape() {
-                        out.push_str(&s);
+                    if let Ok(decoded) = t.decode() {
+                        out.push_str(&decoded);
+                    }
+                }
+            }
+            Ok(Event::GeneralRef(reference)) => {
+                if in_t {
+                    push_xml_reference(&mut out, &reference);
+                }
+            }
+            Ok(Event::CData(ref text)) => {
+                if in_t {
+                    if let Ok(decoded) = text.decode() {
+                        out.push_str(&decoded);
                     }
                 }
             }
@@ -242,12 +254,29 @@ fn xml_to_markdown(xml: &str, images: &HashMap<String, String>) -> String {
     cleaned
 }
 
+fn push_xml_reference(out: &mut String, reference: &quick_xml::events::BytesRef<'_>) {
+    if let Ok(Some(character)) = reference.resolve_char_ref() {
+        out.push(character);
+    } else if let Ok(name) = reference.decode() {
+        if let Some(value) = quick_xml::escape::resolve_xml_entity(&name) {
+            out.push_str(value);
+        } else {
+            // Preserve unknown named entities without expanding untrusted DTD content.
+            out.push('&');
+            out.push_str(&name);
+            out.push(';');
+        }
+    }
+}
+
 fn collect_embed_attrs(e: &quick_xml::events::BytesStart<'_>, pending: &mut Vec<String>) {
     for attr in e.attributes().flatten() {
         let key = attr.key.local_name();
         let k = key.as_ref();
         if k == b"embed" || k == b"id" || k == b"link" {
-            if let Ok(v) = attr.unescape_value() {
+            if let Ok(v) =
+                attr.decoded_and_normalized_value(quick_xml::XmlVersion::Implicit1_0, e.decoder())
+            {
                 let s = v.to_string();
                 if !s.is_empty() {
                     pending.push(s);
@@ -289,11 +318,12 @@ mod tests {
     fn xml_extracts_text_runs() {
         let xml = r#"<?xml version="1.0"?>
         <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-          <w:body><w:p><w:r><w:t>Hello</w:t></w:r><w:r><w:t xml:space="preserve"> world</w:t></w:r></w:p></w:body>
+          <w:body><w:p><w:r><w:t>Hello</w:t></w:r><w:r><w:t xml:space="preserve"> world &amp; XML</w:t></w:r></w:p></w:body>
         </w:document>"#;
         let t = xml_to_markdown(xml, &HashMap::new());
         assert!(t.contains("Hello"));
         assert!(t.contains("world"));
+        assert!(t.contains("world & XML"));
     }
 
     #[test]

@@ -134,3 +134,23 @@ export interface PdfPosition {
   points?: PdfPoint[];
   shape?: "rect" | "ellipse" | "arrow";
 }
+
+export type BackupKind = "daily" | "manual" | "pre_migration" | "emergency" | "unknown";
+
+export interface BackupInfo {
+  id: string;
+  kind: BackupKind;
+  created_at: string;
+  size_bytes: number;
+  schema_version: number;
+  file_name: string;
+  readable: boolean;
+  error: string | null;
+}
+
+export interface BackupRestoreResult {
+  restored: BackupInfo;
+  emergency: BackupInfo;
+  reindexed_items: number | null;
+  warning: string | null;
+}

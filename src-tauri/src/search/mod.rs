@@ -10,10 +10,14 @@ use tantivy::query::QueryParser;
 use tantivy::schema::*;
 use tantivy::{Index, IndexReader, IndexWriter, ReloadPolicy, TantivyDocument};
 
+#[cfg(test)]
+use std::path::PathBuf;
+
 pub struct SearchState {
     index: Mutex<Index>,
     reader: Mutex<IndexReader>,
     fields: SearchFields,
+    needs_reindex: bool,
 }
 
 struct SearchFields {
@@ -54,10 +58,24 @@ impl SearchState {
             path,
         };
 
-        let dir = MmapDirectory::open(&index_dir)
-            .map_err(|e| AppError::Message(format!("tantivy dir: {e}")))?;
-        let index = Index::open_or_create(dir, schema)
-            .map_err(|e| AppError::Message(format!("tantivy open_or_create: {e}")))?;
+        let had_index = index_dir.join("meta.json").is_file();
+        let (index, rebuilt) = match open_index(&index_dir, &schema) {
+            Ok(index) => (index, false),
+            Err(error) if index_can_be_rebuilt(&error) => {
+                reset_index_directory(&index_dir)?;
+                let index = open_index(&index_dir, &schema).map_err(|retry_error| {
+                    AppError::Message(format!(
+                        "tantivy rebuild failed after {error}: {retry_error}"
+                    ))
+                })?;
+                (index, true)
+            }
+            Err(error) => {
+                return Err(AppError::Message(format!(
+                    "tantivy open_or_create: {error}"
+                )));
+            }
+        };
 
         let reader = index
             .reader_builder()
@@ -69,7 +87,12 @@ impl SearchState {
             index: Mutex::new(index),
             reader: Mutex::new(reader),
             fields,
+            needs_reindex: rebuilt || !had_index,
         })
+    }
+
+    pub fn needs_reindex(&self) -> bool {
+        self.needs_reindex
     }
 
     fn writer(&self) -> AppResult<IndexWriter> {
@@ -146,7 +169,10 @@ impl SearchState {
             .parse_query(query)
             .map_err(|e| AppError::Message(format!("bad query: {e}")))?;
         let top = searcher
-            .search(&q, &TopDocs::with_limit(limit.clamp(1, 100)))
+            .search(
+                &q,
+                &TopDocs::with_limit(limit.clamp(1, 100)).order_by_score(),
+            )
             .map_err(|e| AppError::Message(format!("search: {e}")))?;
 
         let mut hits = Vec::new();
@@ -235,6 +261,34 @@ impl SearchState {
     }
 }
 
+fn open_index(index_dir: &Path, schema: &Schema) -> tantivy::Result<Index> {
+    let directory = MmapDirectory::open(index_dir)?;
+    Index::open_or_create(directory, schema.clone())
+}
+
+fn index_can_be_rebuilt(error: &tantivy::TantivyError) -> bool {
+    matches!(
+        error,
+        tantivy::TantivyError::IncompatibleIndex(_)
+            | tantivy::TantivyError::SchemaError(_)
+            | tantivy::TantivyError::DataCorruption(_)
+    )
+}
+
+fn reset_index_directory(index_dir: &Path) -> AppResult<()> {
+    if let Ok(metadata) = std::fs::symlink_metadata(index_dir) {
+        if metadata.file_type().is_symlink() {
+            return Err(AppError::Message(format!(
+                "refusing to replace symlinked search index: {}",
+                index_dir.display()
+            )));
+        }
+        std::fs::remove_dir_all(index_dir)?;
+    }
+    std::fs::create_dir_all(index_dir)?;
+    Ok(())
+}
+
 pub fn index_opened_document(
     search: &SearchState,
     id: &str,
@@ -258,4 +312,46 @@ pub fn index_journal_entry(
     body: &str,
 ) -> AppResult<()> {
     search.upsert_document(id, "journal", title, body, None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TestDir(PathBuf);
+
+    impl TestDir {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "soheidesk-search-test-{}",
+                uuid::Uuid::new_v4().simple()
+            ));
+            std::fs::create_dir(&path).expect("test directory");
+            Self(path)
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn rebuilds_corrupted_recreatable_index() {
+        let directory = TestDir::new();
+        let index_dir = directory.0.join("tantivy_index");
+        std::fs::create_dir(&index_dir).expect("index directory");
+        std::fs::write(index_dir.join("meta.json"), b"not valid json").expect("corrupt index");
+
+        let search = SearchState::open(&directory.0).expect("rebuild index");
+
+        assert!(search.needs_reindex());
+        search
+            .upsert_document("id", "document", "Linear algebra", "vector space", None)
+            .expect("index document");
+        let hits = search.search("vector", 10).expect("search rebuilt index");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, "id");
+    }
 }

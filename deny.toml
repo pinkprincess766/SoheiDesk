@@ -1,0 +1,34 @@
+[graph]
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+]
+all-features = true
+
+[advisories]
+yanked = "deny"
+unmaintained = "all"
+unsound = "all"
+unused-ignored-advisory = "deny"
+ignore = [
+    { id = "RUSTSEC-2024-0370", reason = "Tauri's Linux GTK3 stack still pulls proc-macro-error through glib-macros; no compatible maintained replacement is available." },
+    { id = "RUSTSEC-2024-0411", reason = "Tauri's Linux backend requires gtk-rs GTK3; remove this exception with the GTK4 platform migration." },
+    { id = "RUSTSEC-2024-0412", reason = "Tauri's Linux backend requires gtk-rs GTK3; remove this exception with the GTK4 platform migration." },
+    { id = "RUSTSEC-2024-0413", reason = "Tauri's Linux backend requires gtk-rs GTK3; remove this exception with the GTK4 platform migration." },
+    { id = "RUSTSEC-2024-0414", reason = "Tauri's Linux backend requires gtk-rs GTK3; remove this exception with the GTK4 platform migration." },
+    { id = "RUSTSEC-2024-0415", reason = "Tauri's Linux backend requires gtk-rs GTK3; remove this exception with the GTK4 platform migration." },
+    { id = "RUSTSEC-2024-0416", reason = "Tauri's Linux backend requires gtk-rs GTK3; remove this exception with the GTK4 platform migration." },
+    { id = "RUSTSEC-2024-0417", reason = "Tauri's Linux backend requires gtk-rs GTK3; remove this exception with the GTK4 platform migration." },
+    { id = "RUSTSEC-2024-0418", reason = "Tauri's Linux backend requires gtk-rs GTK3; remove this exception with the GTK4 platform migration." },
+    { id = "RUSTSEC-2024-0419", reason = "Tauri's Linux backend requires gtk-rs GTK3; remove this exception with the GTK4 platform migration." },
+    { id = "RUSTSEC-2024-0420", reason = "Tauri's Linux backend requires gtk-rs GTK3; remove this exception with the GTK4 platform migration." },
+    { id = "RUSTSEC-2024-0429", reason = "Tauri's Linux GTK3 stack requires glib 0.18; the affected VariantStrIter API is unused. Remove when Tauri adopts glib 0.20+." },
+    { id = "RUSTSEC-2025-0075", reason = "Tauri's urlpattern dependency still uses rust-unic; no compatible maintained upgrade is currently available." },
+    { id = "RUSTSEC-2025-0080", reason = "Tauri's urlpattern dependency still uses rust-unic; no compatible maintained upgrade is currently available." },
+    { id = "RUSTSEC-2025-0081", reason = "Tauri's urlpattern dependency still uses rust-unic; no compatible maintained upgrade is currently available." },
+    { id = "RUSTSEC-2025-0098", reason = "Tauri's urlpattern dependency still uses rust-unic; no compatible maintained upgrade is currently available." },
+    { id = "RUSTSEC-2025-0100", reason = "Tauri's urlpattern dependency still uses rust-unic; no compatible maintained upgrade is currently available." },
+    { id = "RUSTSEC-2026-0192", reason = "pdf-extract still pulls ttf-parser through lopdf; no compatible maintained replacement is currently available." },
+]

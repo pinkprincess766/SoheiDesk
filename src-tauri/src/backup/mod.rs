@@ -1067,7 +1067,7 @@ pub fn restore_backup(
         )
         .map_err(AppError::from)
         .and_then(|_| {
-            db::migrations::apply_with_hook(&conn, |connection, _from, target| {
+            db::migrations::apply_with_hook(&mut conn, |connection, _from, target| {
                 create_archive(
                     &db.data_dir,
                     connection,

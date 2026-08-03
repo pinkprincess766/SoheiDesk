@@ -24,8 +24,19 @@ jobs:
           node-version: "22"
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --audit-level high
       - run: pnpm test:frontend
       - run: pnpm build
+
+  dependency-audit:
+    name: Dependencies
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: ./src-tauri/Cargo.toml
+          command: check advisories
 
   rust:
     name: Rust

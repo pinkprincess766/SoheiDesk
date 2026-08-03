@@ -121,6 +121,12 @@ restore verifies all SHA-256 checksums and runs SQLite `integrity_check` before
 current data is changed. The archive layout is documented in
 [docs/backup-format.md](./docs/backup-format.md).
 
+Database upgrades fail closed. SoheiDesk rejects unknown newer or malformed
+schema histories, backs up an existing database before each migration, applies
+each step transactionally, and checks SQLite both before and after commit. The
+contract and failure behavior are documented in
+[docs/database-migrations.md](./docs/database-migrations.md).
+
 SoheiDesk is under active development and is not a validated electronic
 laboratory notebook. Source documents opened from locations outside the app
 data directory are not guaranteed to be copied into a SoheiDesk backup; keep

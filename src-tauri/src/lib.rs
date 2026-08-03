@@ -40,8 +40,12 @@ pub fn run() {
             templates::seed_builtins(&state)?;
             export::seed_export_templates(&state)?;
             let _ = plugins::seed_example_plugins(&state);
-            // Search index: open only — full reindex is expensive; do it in background later / on demand
             let search = SearchState::open(&state.data_dir)?;
+            // Tantivy indices are disposable and may need rebuilding after an
+            // index-format upgrade or recovery from local corruption.
+            if search.needs_reindex() {
+                search.reindex_all(&state)?;
+            }
             app.manage(CollabState::default());
             app.manage(search);
             app.manage(state);

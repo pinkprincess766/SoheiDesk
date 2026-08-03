@@ -179,7 +179,8 @@ fn cleanup_pdf_text(s: &str) -> String {
 mod tests {
     #[test]
     fn bundled_pdf_is_readable_by_rust_fallback() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/sample.pdf");
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/sample.pdf");
         let text = pdf_extract::extract_text(path).expect("extract bundled PDF fixture");
 
         assert!(text.chars().any(|character| !character.is_whitespace()));

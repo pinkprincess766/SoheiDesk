@@ -8,16 +8,16 @@ pnpm-debug.log*
 lerna-debug.log*
 
 # Dependencies & build
-node_modules
+node_modules/
 .pnpm-store/
-dist
-dist-ssr
-dist-artifacts
+dist/
+dist-ssr/
+dist-artifacts/
 *.local
 
 # Tauri / Rust
-src-tauri/target
-src-tauri/gen/schemas
+src-tauri/target/
+src-tauri/gen/schemas/
 
 # Env & secrets (never commit)
 .env
@@ -47,14 +47,9 @@ secrets*
 *.exe
 *.app
 
-# Duplicate brand sources in repo root (canonical copies live in assets/brand/)
+# Duplicate brand sources in repo root (canonical copies live in resources/brand/)
 /grok-image-*.jpg
 /5e290c76-*.jpg
-
-# Keep repo light — never commit build artifacts (can be multi‑GB)
-src-tauri/target/
-dist/
-node_modules/
 
 # Apple Pages originals if reappear
 *.pages
@@ -73,8 +68,6 @@ node_modules/
 docs/private/
 *.export.txt
 
-# Scratch / Imagine dumps in repo root
-/grok-image-*.jpg
-/5e290c76-*.jpg
+# Scratch image dumps in repo root
 /*.jpg
-!assets/**/*.jpg
+!resources/**/*.jpg

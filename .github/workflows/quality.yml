@@ -80,3 +80,16 @@ jobs:
             exit "$status"
           fi
       - run: cargo test --manifest-path src-tauri/Cargo.toml
+
+  rust-windows:
+    name: Rust (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+      # This executes the platform-specific atomic replacement path used by
+      # exports instead of merely type-checking it on Unix CI.
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked

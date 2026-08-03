@@ -349,7 +349,7 @@ mod tests {
     #[test]
     fn extracts_real_fixture_with_image() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../fixtures/sample-with-image.docx");
+            .join("../tests/fixtures/sample-with-image.docx");
         if !path.is_file() {
             return;
         }

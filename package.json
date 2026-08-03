@@ -5,16 +5,16 @@
   "type": "module",
   "packageManager": "pnpm@9.15.0",
   "scripts": {
-    "dev": "vite",
-    "build": "vue-tsc --noEmit && vite build",
+    "dev": "vite --config frontend/vite.config.ts",
+    "build": "vue-tsc --noEmit -p frontend/tsconfig.json && vite build --config frontend/vite.config.ts",
     "test:frontend": "node --experimental-strip-types --test tests/*.test.ts",
-    "preview": "vite preview",
+    "preview": "vite preview --config frontend/vite.config.ts",
     "tauri": "tauri",
     "app:dev": "tauri dev",
-    "app:dev:ui": "vite --port 1420 --strictPort",
+    "app:dev:ui": "vite --config frontend/vite.config.ts --port 1420 --strictPort",
     "app:build": "tauri build",
     "app:build:arm": "tauri build --target aarch64-apple-darwin",
-    "app:icons": "tauri icon assets/brand/app-icon-1024.png",
+    "app:icons": "tauri icon resources/brand/app-icon-1024.png",
     "clean": "bash scripts/clean.sh"
   },
   "dependencies": {

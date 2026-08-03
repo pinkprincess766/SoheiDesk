@@ -1,3 +1,4 @@
+use crate::atomic_file;
 use crate::db::{with_conn, DbState};
 use crate::error::{AppError, AppResult};
 use chrono::Utc;
@@ -330,8 +331,7 @@ pub fn export_template_to_path(db: &DbState, id: &str, path: &str) -> AppResult<
         default_tags: Some(tags),
     };
     let json = serde_json::to_string_pretty(&file)?;
-    std::fs::write(path, json)?;
-    Ok(())
+    atomic_file::write_bytes(path, json.as_bytes())
 }
 
 pub fn import_template_from_path(db: &DbState, path: &str) -> AppResult<TemplateRecord> {

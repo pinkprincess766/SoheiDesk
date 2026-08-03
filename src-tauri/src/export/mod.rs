@@ -1,5 +1,6 @@
 //! Multi-format export: Markdown → Typst / LaTeX / HTML / DOCX (+ templates).
 
+use crate::atomic_file;
 use crate::db::{with_conn, DbState};
 use crate::error::{AppError, AppResult};
 use crate::journal::{self, JournalEntry};
@@ -800,9 +801,20 @@ pub fn preview_period_export(
 
 /// Minimal DOCX (WordprocessingML) from plain paragraphs.
 pub fn write_simple_docx(path: &str, title: &str, body_text: &str) -> AppResult<()> {
+    atomic_file::write_file(
+        path,
+        |file| write_simple_docx_contents(file, title, body_text),
+        validate_simple_docx,
+    )
+}
+
+fn write_simple_docx_contents(
+    file: std::fs::File,
+    title: &str,
+    body_text: &str,
+) -> AppResult<std::fs::File> {
     use std::io::Write;
     let map_zip = |e: zip::result::ZipError| AppError::Message(format!("docx zip: {e}"));
-    let file = std::fs::File::create(path)?;
     let mut zip = zip::ZipWriter::new(file);
     let opts = zip::write::SimpleFileOptions::default()
         .compression_method(zip::CompressionMethod::Deflated);
@@ -849,7 +861,36 @@ pub fn write_simple_docx(path: &str, title: &str, body_text: &str) -> AppResult<
     );
     zip.start_file("word/document.xml", opts).map_err(map_zip)?;
     zip.write_all(document.as_bytes())?;
-    zip.finish().map_err(map_zip)?;
+    let file = zip.finish().map_err(map_zip)?;
+    Ok(file)
+}
+
+fn validate_simple_docx(path: &std::path::Path) -> AppResult<()> {
+    use std::io::Read;
+
+    let map_zip = |error: zip::result::ZipError| {
+        AppError::Message(format!("generated DOCX failed validation: {error}"))
+    };
+    let file = std::fs::File::open(path)?;
+    let mut archive = zip::ZipArchive::new(file).map_err(map_zip)?;
+    for required in ["[Content_Types].xml", "_rels/.rels"] {
+        let entry = archive.by_name(required).map_err(map_zip)?;
+        if entry.is_dir() || entry.size() == 0 {
+            return Err(AppError::Message(format!(
+                "generated DOCX contains an empty {required} entry"
+            )));
+        }
+    }
+    let mut document = String::new();
+    archive
+        .by_name("word/document.xml")
+        .map_err(map_zip)?
+        .read_to_string(&mut document)?;
+    if !document.contains("<w:document") || !document.contains("<w:body>") {
+        return Err(AppError::Message(
+            "generated DOCX has an invalid document body".into(),
+        ));
+    }
     Ok(())
 }
 
@@ -883,8 +924,7 @@ pub fn export_entry_to_path(
         author.as_deref().unwrap_or(""),
         project.as_deref().unwrap_or(""),
     )?;
-    std::fs::write(path, content)?;
-    Ok(())
+    atomic_file::write_bytes(path, content.as_bytes())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -915,13 +955,29 @@ pub fn export_period_to_path(
     if format == ExportFormat::Docx {
         return write_simple_docx(path, &preview.title, &preview.content);
     }
-    std::fs::write(path, preview.content)?;
-    Ok(())
+    atomic_file::write_bytes(path, preview.content.as_bytes())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+
+    struct TestDirectory(std::path::PathBuf);
+
+    impl TestDirectory {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!("soheidesk-docx-{}", Uuid::new_v4()));
+            std::fs::create_dir(&path).expect("create test directory");
+            Self(path)
+        }
+    }
+
+    impl Drop for TestDirectory {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
 
     #[test]
     fn md_to_latex_has_section() {
@@ -943,5 +999,47 @@ mod tests {
         let t2 = md_to_latex_body("$a+b$");
         assert!(t2.contains("\\[") || t2.contains("a+b"));
         let _ = t;
+    }
+
+    #[test]
+    fn docx_is_validated_before_replacing_existing_export() {
+        let directory = TestDirectory::new();
+        let destination = directory.0.join("report.docx");
+        std::fs::write(&destination, b"old report").expect("old report");
+
+        write_simple_docx(
+            destination.to_str().expect("UTF-8 test path"),
+            "Experiment",
+            "Complete result",
+        )
+        .expect("write DOCX");
+
+        validate_simple_docx(&destination).expect("validate written DOCX");
+        assert_ne!(
+            std::fs::read(&destination).expect("read DOCX"),
+            b"old report"
+        );
+    }
+
+    #[test]
+    fn invalid_docx_keeps_existing_export() {
+        let directory = TestDirectory::new();
+        let destination = directory.0.join("report.docx");
+        std::fs::write(&destination, b"old report").expect("old report");
+
+        let result = atomic_file::write_file(
+            &destination,
+            |mut file| {
+                file.write_all(b"not a DOCX")?;
+                Ok(file)
+            },
+            validate_simple_docx,
+        );
+
+        assert!(result.is_err());
+        assert_eq!(
+            std::fs::read(&destination).expect("read old report"),
+            b"old report"
+        );
     }
 }

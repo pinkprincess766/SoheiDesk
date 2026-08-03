@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/brand/app-icon-1024.png" width="96" height="96" alt="SoheiDesk" />
+  <img src="resources/brand/app-icon-1024.png" width="96" height="96" alt="SoheiDesk" />
 </p>
 
 <h1 align="center">SoheiDesk</h1>
@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="./README.ru.md">Русский</a>
+  <a href="./docs/translations/README.ru.md">Русский</a>
   ·
   <a href="https://github.com/pinkprincess766/SoheiDesk/releases">Releases</a>
   ·
@@ -119,13 +119,20 @@ before each database migration and an emergency copy before restore. Manual
 creation, backup history, and restore are available in **Settings**. Every
 restore verifies all SHA-256 checksums and runs SQLite `integrity_check` before
 current data is changed. The archive layout is documented in
-[docs/backup-format.md](./docs/backup-format.md).
+[docs/architecture/backup-format.md](./docs/architecture/backup-format.md).
 
 Database upgrades fail closed. SoheiDesk rejects unknown newer or malformed
 schema histories, backs up an existing database before each migration, applies
 each step transactionally, and checks SQLite both before and after commit. The
 contract and failure behavior are documented in
-[docs/database-migrations.md](./docs/database-migrations.md).
+[docs/architecture/database-migrations.md](./docs/architecture/database-migrations.md).
+
+User-facing exports are written to a verified temporary file beside the chosen
+destination, synchronized, and atomically installed only after validation. A
+failed or interrupted export therefore leaves the previous file unchanged. The
+contract covers Markdown, HTML, Typst, LaTeX, DOCX, BibTeX, annotation exports,
+and JSON templates; implementation details are documented in
+[docs/architecture/atomic-file-writes.md](./docs/architecture/atomic-file-writes.md).
 
 SoheiDesk is under active development and is not a validated electronic
 laboratory notebook. Source documents opened from locations outside the app
@@ -156,6 +163,22 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
 `src-tauri/target` can grow to several gigabytes during Rust builds. Run
 `pnpm clean` to remove generated build artifacts.
+
+## Project layout
+
+The repository keeps runtime code, test material, documentation, and source
+assets separate:
+
+- `frontend/` - Vue application, Vite configuration, and static web assets
+- `src-tauri/` - Rust application core and Tauri desktop configuration
+- `tests/fixtures/` - sample documents used only by automated tests
+- `resources/brand/` - source artwork used to generate application icons
+- `docs/architecture/` - storage formats and internal contracts
+- `docs/releases/` - version-specific release notes
+- `docs/translations/` - translated project documentation
+
+See [the project structure guide](./docs/project-structure.md) before adding a
+new top-level directory.
 
 ## Current scope
 

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/brand/app-icon-1024.png" width="96" height="96" alt="SoheiDesk" />
+  <img src="../../resources/brand/app-icon-1024.png" width="96" height="96" alt="SoheiDesk" />
 </p>
 
 <h1 align="center">SoheiDesk</h1>
@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="./README.md">English</a>
+  <a href="../../README.md">English</a>
   ·
   <a href="https://github.com/pinkprincess766/SoheiDesk/releases">Релизы</a>
   ·
@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/pdf-zoom.gif" width="900" alt="Открытие и масштабирование PDF в SoheiDesk" />
+  <img src="../images/pdf-zoom.gif" width="900" alt="Открытие и масштабирование PDF в SoheiDesk" />
 </p>
 
 SoheiDesk — приложение на ранней стадии разработки для понятного рабочего
@@ -49,7 +49,7 @@ SoheiDesk — приложение на ранней стадии разрабо
 
 | PDF и инструменты аннотаций | Шаблоны лабораторного журнала |
 |:---------------------------:|:-----------------------------:|
-| <img src="docs/images/reader.png" width="560" alt="PDF-ридер с инструментами аннотаций" /> | <img src="docs/images/journal.png" width="560" alt="Выбор шаблона лабораторного журнала" /> |
+| <img src="../images/reader.png" width="560" alt="PDF-ридер с инструментами аннотаций" /> | <img src="../images/journal.png" width="560" alt="Выбор шаблона лабораторного журнала" /> |
 
 ## Два режима интерфейса
 
@@ -117,13 +117,21 @@ SoheiDesk — приложение на ранней стадии разрабо
 аварийная. Ручное создание, список и восстановление находятся в
 **Настройках**. До изменения текущих данных SoheiDesk проверяет SHA-256 всех
 файлов архива и выполняет SQLite `integrity_check`. Формат архива описан в
-[docs/backup-format.md](./docs/backup-format.md).
+[docs/architecture/backup-format.md](../architecture/backup-format.md).
 
 Обновление базы работает по принципу fail-closed. SoheiDesk отказывается
 открывать неизвестную более новую или повреждённую историю схемы, создаёт
 копию существующей базы перед каждым шагом, выполняет миграцию транзакционно и
 проверяет SQLite до и после commit. Контракт и поведение при ошибках
-описаны в [docs/database-migrations.md](./docs/database-migrations.md).
+описаны в
+[docs/architecture/database-migrations.md](../architecture/database-migrations.md).
+
+Пользовательские экспорты сначала записываются во временный файл рядом с
+выбранным назначением, синхронизируются и проверяются. Только после этого новый
+файл атомарно заменяет старый. Поэтому ошибка или прерывание экспорта оставляет
+предыдущий файл неизменным. Контракт применяется к Markdown, HTML, Typst,
+LaTeX, DOCX, BibTeX, экспорту аннотаций и JSON-шаблонам; подробности описаны в
+[docs/architecture/atomic-file-writes.md](../architecture/atomic-file-writes.md).
 
 SoheiDesk активно разрабатывается и не является сертифицированной электронной
 лабораторной системой. Исходные документы, открытые из папок вне каталога
@@ -155,6 +163,21 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 Папка `src-tauri/target` во время сборки Rust может занять несколько гигабайт.
 Команда `pnpm clean` удаляет сгенерированные артефакты.
 
+## Структура проекта
+
+Код приложения, тестовые материалы, документация и исходные ресурсы разделены:
+
+- `frontend/` - Vue-приложение, конфигурация Vite и статические web-ресурсы
+- `src-tauri/` - ядро на Rust и конфигурация настольного приложения Tauri
+- `tests/fixtures/` - тестовые документы, не используемые приложением
+- `resources/brand/` - исходные изображения для генерации иконок
+- `docs/architecture/` - форматы хранения и внутренние контракты
+- `docs/releases/` - заметки к отдельным версиям
+- `docs/translations/` - переводы основной документации
+
+Перед добавлением нового каталога верхнего уровня стоит свериться с
+[описанием структуры](../project-structure.md).
+
 ## Текущие границы проекта
 
 Сегодня SoheiDesk — локальный ридер и рабочий журнал. Семантический поиск с ИИ,
@@ -167,4 +190,4 @@ Vue 3 · TypeScript · Pinia · Tauri 2 · Rust · SQLite · PDF.js
 
 ## Лицензия
 
-[MIT](./LICENSE)
+[MIT](../../LICENSE)

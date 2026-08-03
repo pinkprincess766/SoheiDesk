@@ -1,4 +1,5 @@
 mod annotations;
+mod atomic_file;
 mod backup;
 mod collab;
 mod commands;

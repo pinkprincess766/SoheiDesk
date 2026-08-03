@@ -1,3 +1,4 @@
+use crate::atomic_file;
 use crate::db::{with_conn, DbState};
 use crate::error::{AppError, AppResult};
 use chrono::Utc;
@@ -189,6 +190,5 @@ pub fn export_markdown_to_path(
     path: &str,
 ) -> AppResult<()> {
     let md = export_markdown(db, document_id, doc_title)?;
-    std::fs::write(path, md)?;
-    Ok(())
+    atomic_file::write_bytes(path, md.as_bytes())
 }

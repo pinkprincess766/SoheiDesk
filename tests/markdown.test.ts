@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { renderMarkdown } from "../src/utils/markdown.ts";
+import { renderMarkdown } from "../frontend/src/utils/markdown.ts";
 
 test("escapes raw HTML and script tags", () => {
   const html = renderMarkdown('<script>alert("x")</script>');

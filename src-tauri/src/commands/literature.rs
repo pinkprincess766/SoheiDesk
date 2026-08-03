@@ -1,3 +1,4 @@
+use crate::atomic_file;
 use crate::db::DbState;
 use crate::error::AppResult;
 use crate::literature::{self, BiblioItem, LiteratureHit};
@@ -45,6 +46,5 @@ pub fn export_bibliography_to_file(
     path: String,
 ) -> AppResult<()> {
     let content = literature::export_bibliography(&db, &style)?;
-    std::fs::write(path, content)?;
-    Ok(())
+    atomic_file::write_bytes(path, content.as_bytes())
 }

@@ -1,3 +1,4 @@
+use crate::atomic_file;
 use crate::db::{with_conn, DbState};
 use crate::error::{AppError, AppResult};
 use crate::templates::{self, TemplateField, TemplateRecord};
@@ -419,8 +420,7 @@ pub fn preview_export(db: &DbState, id: &str) -> AppResult<ExportPreview> {
 
 pub fn export_entry_to_path(db: &DbState, id: &str, path: &str) -> AppResult<()> {
     let preview = preview_export(db, id)?;
-    std::fs::write(path, preview.markdown)?;
-    Ok(())
+    atomic_file::write_bytes(path, preview.markdown.as_bytes())
 }
 
 pub fn save_entry_as_template(

@@ -1,3 +1,9 @@
 # Single-package app (required by pnpm when this file exists)
 packages:
   - "."
+
+# Keep vulnerable transitive releases out of every workspace importer. pnpm 10
+# reads dependency policy from this file rather than the package.json field.
+overrides:
+  "brace-expansion@>=2.0.0 <2.1.4": "2.1.4"
+  "postcss@<=8.5.22": "8.5.23"

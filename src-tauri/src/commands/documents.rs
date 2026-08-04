@@ -1,6 +1,6 @@
 use crate::db::DbState;
 use crate::error::AppResult;
-use crate::library::{self, DocumentRecord, OpenResult};
+use crate::library::{self, DocumentRecord, DocumentVersion, OpenResult};
 use tauri::State;
 
 #[tauri::command]
@@ -11,6 +11,14 @@ pub fn open_document_path(db: State<'_, DbState>, path: String) -> AppResult<Ope
 #[tauri::command]
 pub fn list_documents(db: State<'_, DbState>) -> AppResult<Vec<DocumentRecord>> {
     library::list_documents(&db)
+}
+
+#[tauri::command]
+pub fn list_document_versions(
+    db: State<'_, DbState>,
+    document_id: String,
+) -> AppResult<Vec<DocumentVersion>> {
+    library::list_versions(&db, &document_id)
 }
 
 #[tauri::command]

@@ -42,6 +42,9 @@ export const useAnnotationsStore = defineStore("annotations", {
       position_json: string;
       content?: string | null;
       color?: string | null;
+      selected_text?: string | null;
+      context_before?: string | null;
+      context_after?: string | null;
     }) {
       const app = useAppStore();
       try {
@@ -53,6 +56,9 @@ export const useAnnotationsStore = defineStore("annotations", {
             position_json: input.position_json,
             content: input.content ?? null,
             color: input.color ?? this.activeColor,
+            selected_text: input.selected_text ?? null,
+            context_before: input.context_before ?? null,
+            context_after: input.context_after ?? null,
           },
         });
         this.items.push(ann);

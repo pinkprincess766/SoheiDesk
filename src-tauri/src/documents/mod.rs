@@ -60,33 +60,48 @@ impl DocType {
     }
 }
 
-/// Stable content fingerprint: size || head || tail (SHA-256 hex).
+/// Full-file SHA-256 used as the durable document identity.
 pub fn content_hash(path: &Path) -> AppResult<(String, u64)> {
     let mut file = File::open(path)?;
     let file_size = file.metadata()?.len();
 
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 128 * 1024];
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+
+    Ok((hex::encode(hasher.finalize()), file_size))
+}
+
+/// Compatibility fingerprint used only to recognize rows created before v5.
+/// It must not be exposed as SHA-256 because bytes in the middle were skipped.
+pub(crate) fn legacy_content_hash(path: &Path) -> AppResult<(String, u64)> {
+    let mut file = File::open(path)?;
+    let file_size = file.metadata()?.len();
     let mut hasher = Sha256::new();
     hasher.update(file_size.to_le_bytes());
 
     if file_size == 0 {
         return Ok((hex::encode(hasher.finalize()), 0));
     }
-
     if file_size <= HASH_CHUNK * 2 {
-        let mut buf = Vec::with_capacity(file_size as usize);
-        file.read_to_end(&mut buf)?;
-        hasher.update(&buf);
+        let mut buffer = Vec::with_capacity(file_size as usize);
+        file.read_to_end(&mut buffer)?;
+        hasher.update(buffer);
     } else {
-        let mut head = vec![0u8; HASH_CHUNK as usize];
+        let mut head = vec![0_u8; HASH_CHUNK as usize];
         file.read_exact(&mut head)?;
-        hasher.update(&head);
-
+        hasher.update(head);
         file.seek(SeekFrom::End(-(HASH_CHUNK as i64)))?;
-        let mut tail = vec![0u8; HASH_CHUNK as usize];
+        let mut tail = vec![0_u8; HASH_CHUNK as usize];
         file.read_exact(&mut tail)?;
-        hasher.update(&tail);
+        hasher.update(tail);
     }
-
     Ok((hex::encode(hasher.finalize()), file_size))
 }
 
@@ -127,6 +142,22 @@ mod tests {
     }
 
     #[test]
+    fn content_hash_is_standard_sha256() {
+        let path = std::env::temp_dir().join(format!(
+            "sohei_hash_vector_{}.txt",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::write(&path, b"abc").unwrap();
+        let (hash, size) = content_hash(&path).unwrap();
+        assert_eq!(
+            hash,
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        assert_eq!(size, 3);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn content_hash_differs_when_content_changes() {
         let dir = std::env::temp_dir();
         let t = SystemTime::now()
@@ -142,6 +173,27 @@ mod tests {
         std::fs::write(&path, b"version-two").unwrap();
         let (h2, _) = content_hash(&path).unwrap();
         assert_ne!(h1, h2);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn full_hash_detects_changes_hidden_from_legacy_fingerprint() {
+        let path = std::env::temp_dir().join(format!(
+            "sohei_hash_middle_{}.bin",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let mut payload = vec![b'a'; (HASH_CHUNK * 3) as usize];
+        std::fs::write(&path, &payload).unwrap();
+        let (full_before, _) = content_hash(&path).unwrap();
+        let (legacy_before, _) = legacy_content_hash(&path).unwrap();
+
+        payload[HASH_CHUNK as usize + 10] = b'b';
+        std::fs::write(&path, &payload).unwrap();
+        let (full_after, _) = content_hash(&path).unwrap();
+        let (legacy_after, _) = legacy_content_hash(&path).unwrap();
+
+        assert_ne!(full_before, full_after);
+        assert_eq!(legacy_before, legacy_after);
         let _ = std::fs::remove_file(path);
     }
 

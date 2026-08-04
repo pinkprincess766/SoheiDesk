@@ -27,9 +27,14 @@ pub struct OpenedDocument {
     pub cache_path: Option<String>,
 }
 
-/// Open a document for viewing.
-/// `cache_dir` = app_data/media/{content_hash}/ — used for PDF cache + DOCX images.
-pub fn open_document(path: &Path, cache_dir: Option<&Path>) -> AppResult<OpenedDocument> {
+/// Open a document after its identity was already computed by the library.
+/// Reusing the verified digest avoids a second full read of large documents.
+pub fn open_document_with_identity(
+    path: &Path,
+    cache_dir: Option<&Path>,
+    content_hash: String,
+    file_size: u64,
+) -> AppResult<OpenedDocument> {
     if !path.is_file() {
         return Err(AppError::Message(format!(
             "file not found: {}",
@@ -38,7 +43,6 @@ pub fn open_document(path: &Path, cache_dir: Option<&Path>) -> AppResult<OpenedD
     }
 
     let doc_type = DocType::from_path(path)?;
-    let (content_hash, file_size) = crate::documents::content_hash(path)?;
     let title = crate::documents::title_from_path(path);
 
     // Ensure cache dir when provided

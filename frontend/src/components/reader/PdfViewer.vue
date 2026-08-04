@@ -887,12 +887,18 @@ async function onWindowUp(_ev: MouseEvent) {
   if (!rect || rect.w < 1 || rect.h < 1) return;
 
   let content: string | null = null;
+  let selectedText: string | null = null;
+  let contextBefore: string | null = null;
+  let contextAfter: string | null = null;
   if (mode === "comment") {
     content = await askComment();
     if (!content) return;
   } else if (mode === "highlight") {
-    content = await tryExtractText(view.pageNum, rect);
-    if (!content) content = "выделение";
+    const anchor = await tryExtractText(view.pageNum, rect);
+    selectedText = anchor?.selectedText ?? null;
+    contextBefore = anchor?.contextBefore ?? null;
+    contextAfter = anchor?.contextAfter ?? null;
+    content = selectedText || "выделение";
   } else {
     content =
       mode === "ellipse"
@@ -917,18 +923,29 @@ async function onWindowUp(_ev: MouseEvent) {
     }),
     content,
     color: annotations.activeColor,
+    selected_text: selectedText,
+    context_before: contextBefore,
+    context_after: contextAfter,
   });
   paintAllOverlays();
 }
 
-async function tryExtractText(pageNum: number, rect: PdfRect): Promise<string | null> {
+interface PdfTextAnchor {
+  selectedText: string;
+  contextBefore: string;
+  contextAfter: string;
+}
+
+async function tryExtractText(pageNum: number, rect: PdfRect): Promise<PdfTextAnchor | null> {
   if (!pdfDoc) return null;
   try {
     const page = await pdfDoc.getPage(pageNum);
     const content = await page.getTextContent();
     const parts: string[] = [];
+    const pageParts: string[] = [];
     for (const item of content.items as { str?: string; transform?: number[]; width?: number }[]) {
       if (!item.str || !item.transform) continue;
+      pageParts.push(item.str);
       const x = item.transform[4];
       const y = item.transform[5];
       // rough hit-test in PDF space
@@ -941,8 +958,16 @@ async function tryExtractText(pageNum: number, rect: PdfRect): Promise<string | 
         parts.push(item.str);
       }
     }
-    const t = parts.join(" ").replace(/\s+/g, " ").trim();
-    return t ? t.slice(0, 200) : null;
+    const selectedText = parts.join(" ").replace(/\s+/g, " ").trim();
+    if (!selectedText) return null;
+    const pageText = pageParts.join(" ").replace(/\s+/g, " ").trim();
+    const start = pageText.indexOf(selectedText);
+    return {
+      selectedText,
+      contextBefore: start >= 0 ? pageText.slice(Math.max(0, start - 120), start) : "",
+      contextAfter:
+        start >= 0 ? pageText.slice(start + selectedText.length, start + selectedText.length + 120) : "",
+    };
   } catch {
     return null;
   }

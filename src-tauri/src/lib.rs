@@ -66,6 +66,7 @@ pub fn run() {
             commands::restore_backup,
             commands::open_document_path,
             commands::list_documents,
+            commands::list_document_versions,
             commands::remove_document,
             commands::reopen_document,
             commands::read_authorized_file,

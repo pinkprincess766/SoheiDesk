@@ -1,10 +1,18 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { confirm } from "@tauri-apps/plugin-dialog";
+import { confirm, open, save } from "@tauri-apps/plugin-dialog";
 import { useAppStore } from "../stores/app";
 import { useUiModeStore } from "../stores/uiMode";
-import type { BackupInfo, BackupKind, BackupRestoreResult } from "../types";
+import type {
+  BackupInfo,
+  BackupKind,
+  BackupRestoreResult,
+  WorkspaceCounts,
+  WorkspaceExportResult,
+  WorkspaceImportResult,
+  WorkspacePreview,
+} from "../types";
 
 interface CollabStatus {
   running: boolean;
@@ -24,6 +32,9 @@ const backups = ref<BackupInfo[]>([]);
 const backupsVisible = ref(false);
 const backupBusy = ref(false);
 const backupMessage = ref("");
+const workspaceBusy = ref(false);
+const workspaceMessage = ref("");
+const workspacePreview = ref<WorkspacePreview | null>(null);
 
 onMounted(async () => {
   await app.loadInfo();
@@ -92,6 +103,81 @@ function formatBytes(value: number) {
   if (value < 1024 ** 2) return `${(value / 1024).toFixed(1)} КБ`;
   if (value < 1024 ** 3) return `${(value / 1024 ** 2).toFixed(1)} МБ`;
   return `${(value / 1024 ** 3).toFixed(1)} ГБ`;
+}
+
+function totalWorkspaceRecords(counts: WorkspaceCounts) {
+  return Object.values(counts).reduce((total, value) => total + value, 0);
+}
+
+async function exportWorkspace() {
+  const path = await save({
+    defaultPath: `soheidesk-workspace-${new Date().toISOString().slice(0, 10)}.zip`,
+    filters: [{ name: "SoheiDesk workspace", extensions: ["zip"] }],
+  });
+  if (!path) return;
+  workspaceBusy.value = true;
+  workspaceMessage.value = "Создаём и проверяем переносимый архив…";
+  try {
+    const result = await invoke<WorkspaceExportResult>("export_workspace", { path });
+    workspaceMessage.value = result.missing_references.length
+      ? `Архив создан. Не удалось включить ссылок: ${result.missing_references.length}.`
+      : `Архив создан и проверен: ${result.file_count} файлов, ${formatBytes(result.total_size)}.`;
+  } catch (error) {
+    workspaceMessage.value = "";
+    app.setError(String(error));
+  } finally {
+    workspaceBusy.value = false;
+  }
+}
+
+async function selectWorkspaceImport() {
+  const path = await open({
+    multiple: false,
+    filters: [{ name: "SoheiDesk workspace", extensions: ["zip"] }],
+  });
+  if (!path || Array.isArray(path)) return;
+  workspaceBusy.value = true;
+  workspaceMessage.value = "Проверяем структуру, SHA-256 и SQLite…";
+  workspacePreview.value = null;
+  try {
+    workspacePreview.value = await invoke<WorkspacePreview>("preview_workspace_import", { path });
+    workspaceMessage.value = "Архив проверен. Просмотрите состав перед импортом.";
+  } catch (error) {
+    workspaceMessage.value = "";
+    app.setError(String(error));
+  } finally {
+    workspaceBusy.value = false;
+  }
+}
+
+async function importWorkspace() {
+  const preview = workspacePreview.value;
+  if (!preview) return;
+  const replacement = preview.requires_replacement_confirmation
+    ? `\n\nТекущие ${totalWorkspaceRecords(preview.current_counts)} записей будут заменены после создания аварийной копии.`
+    : "";
+  const approved = await confirm(
+    `Импортировать «${preview.file_name}»?${replacement}\n\nБез подтверждения существующие данные не перезаписываются.`,
+    { title: "Импорт рабочего пространства", kind: "warning" },
+  );
+  if (!approved) return;
+  workspaceBusy.value = true;
+  workspaceMessage.value = "Создаём аварийную копию и импортируем данные…";
+  try {
+    const result = await invoke<WorkspaceImportResult>("import_workspace", {
+      token: preview.token,
+      replaceExisting: preview.requires_replacement_confirmation,
+    });
+    workspaceMessage.value = result.warning
+      ? `Импорт завершён. ${result.warning}`
+      : `Импорт завершён. Аварийная копия: ${result.emergency.file_name}. Перезапуск…`;
+    window.setTimeout(() => window.location.reload(), 1400);
+  } catch (error) {
+    workspaceMessage.value = "Импорт не выполнен; текущие данные сохранены.";
+    app.setError(String(error));
+  } finally {
+    workspaceBusy.value = false;
+  }
 }
 
 async function loadBackups() {
@@ -248,6 +334,61 @@ async function restoreBackup(backup: BackupInfo) {
       </div>
 
       <div class="card">
+        <h3 style="margin: 0 0 8px">Перенос рабочего пространства</h3>
+        <p class="muted" style="margin: 0 0 10px; font-size: 0.9rem">
+          Экспорт создаёт обычный ZIP с SQLite, вложениями, media, manifest и README. Архив можно
+          читать без SoheiDesk. Перед импортом показывается состав, а текущие данные не заменяются
+          без отдельного подтверждения.
+        </p>
+        <div class="toolbar">
+          <button class="btn btn-primary" :disabled="workspaceBusy" @click="exportWorkspace">
+            Экспортировать всё…
+          </button>
+          <button class="btn" :disabled="workspaceBusy" @click="selectWorkspaceImport">
+            Проверить архив…
+          </button>
+        </div>
+        <p v-if="workspaceMessage" style="margin: 10px 0 0; font-size: 0.88rem">
+          {{ workspaceMessage }}
+        </p>
+
+        <div v-if="workspacePreview" class="workspace-preview">
+          <div style="display: flex; justify-content: space-between; gap: 10px">
+            <strong>{{ workspacePreview.file_name }}</strong>
+            <span class="badge">
+              {{ workspacePreview.compatibility === "compatible" ? "Совместим" : "Будет обновлён" }}
+            </span>
+          </div>
+          <div class="muted backup-meta">
+            DB v{{ workspacePreview.schema_version }} · SoheiDesk {{ workspacePreview.app_version }} ·
+            {{ workspacePreview.file_count }} файлов · {{ formatBytes(workspacePreview.total_size) }}
+          </div>
+          <ul class="workspace-counts">
+            <li>Документы: {{ workspacePreview.counts.documents }}</li>
+            <li>Аннотации: {{ workspacePreview.counts.annotations }}</li>
+            <li>Записи журнала: {{ workspacePreview.counts.journal_entries }}</li>
+            <li>Вложения: {{ workspacePreview.attachment_count }}</li>
+            <li>Media: {{ workspacePreview.media_count }}</li>
+          </ul>
+          <div v-if="workspacePreview.requires_replacement_confirmation" class="backup-error">
+            Текущее рабочее пространство не пусто. Импорт потребует явного подтверждения замены и
+            сначала создаст аварийную копию.
+          </div>
+          <details v-if="workspacePreview.missing_references.length" class="missing-files">
+            <summary>
+              Недоступные внешние файлы: {{ workspacePreview.missing_references.length }}
+            </summary>
+            <ul>
+              <li v-for="item in workspacePreview.missing_references" :key="item">{{ item }}</li>
+            </ul>
+          </details>
+          <button class="btn btn-primary" :disabled="workspaceBusy" @click="importWorkspace">
+            Импортировать
+          </button>
+        </div>
+      </div>
+
+      <div class="card">
         <h3 style="margin: 0 0 8px">LAN share (коллаб)</h3>
         <p class="muted" style="margin: 0 0 10px; font-size: 0.9rem">
           Read-only HTTP на локальной сети: журнал и библиография. Не для интернета.
@@ -348,5 +489,31 @@ kbd {
   margin-top: 5px;
   color: var(--danger, #c2413b);
   font-size: 0.8rem;
+}
+.workspace-preview {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.workspace-counts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 16px;
+  margin: 10px 0;
+  padding-left: 18px;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+.missing-files {
+  margin: 10px 0;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+.missing-files ul {
+  max-height: 120px;
+  overflow: auto;
+  word-break: break-all;
 }
 </style>

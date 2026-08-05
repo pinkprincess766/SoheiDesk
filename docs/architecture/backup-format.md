@@ -1,7 +1,8 @@
 # SoheiDesk backup format
 
 SoheiDesk backups are ZIP archives stored in the `backups` directory under the
-application data directory. The current format version is `1`.
+application data directory. The current format version is `2`. Version `1`
+archives remain readable; they predate the separate `attachments/` payload.
 
 ## Archive layout
 
@@ -9,6 +10,7 @@ application data directory. The current format version is `1`.
 manifest.json
 database/soheidesk.sqlite
 media/...
+attachments/...
 user-data/settings.json
 user-data/templates.json
 ```
@@ -16,7 +18,8 @@ user-data/templates.json
 - `database/soheidesk.sqlite` is produced with the SQLite Online Backup API.
   The live database file is never copied directly while WAL mode is active.
 - `media/` contains files managed by SoheiDesk, including cached document
-  copies, extracted images, and app-managed attachments.
+  copies and extracted images.
+- `attachments/` contains files copied into app-managed portable storage.
 - `user-data/settings.json` and `user-data/templates.json` are readable exports
   from the same database snapshot. The SQLite database remains the canonical
   source used during restore.
@@ -35,10 +38,11 @@ Before changing current data, SoheiDesk:
 3. Opens the extracted database read-only and runs `PRAGMA integrity_check(1)`.
 4. Creates and verifies an emergency backup of the current state.
 
-The database is restored through SQLite's backup API. App-managed media is
-swapped with rollback support. If the database restore or a required migration
-fails, SoheiDesk restores the emergency database and previous media. The search
-index is rebuilt only after the data restore succeeds.
+The database is restored through SQLite's backup API. App-managed media and
+attachments are swapped with rollback support. If the database restore or a
+required migration fails, SoheiDesk restores the emergency database and both
+previous data trees. The search index is rebuilt only after the data restore
+succeeds.
 
 ## Retention
 

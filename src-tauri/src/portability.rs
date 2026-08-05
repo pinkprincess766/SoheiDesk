@@ -896,11 +896,15 @@ pub fn export_workspace(
         .parent()
         .filter(|value| !value.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
-    fs::create_dir_all(parent)?;
-    let staging = TempDir::create(&db.data_dir, "workspace-export")?;
+    fs::create_dir_all(parent).map_err(|error| {
+        AppError::Message(format!("create workspace destination directory: {error}"))
+    })?;
+    let staging = TempDir::create(&db.data_dir, "workspace-export")
+        .map_err(|error| AppError::Message(format!("create workspace staging: {error}")))?;
     let snapshot = staging.path().join(DATABASE_PATH);
     let readme = staging.path().join(README_PATH);
-    fs::write(&readme, PACKAGE_README.as_bytes())?;
+    fs::write(&readme, PACKAGE_README.as_bytes())
+        .map_err(|error| AppError::Message(format!("write workspace README: {error}")))?;
 
     let _media = db
         .media
@@ -910,23 +914,30 @@ pub fn export_workspace(
         .conn
         .lock()
         .map_err(|_| AppError::Message("database lock poisoned".into()))?;
-    backup::create_sqlite_snapshot(&conn, &snapshot)?;
-    let snapshot_conn = Connection::open_with_flags(&snapshot, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    backup::create_sqlite_snapshot(&conn, &snapshot).map_err(|error| {
+        AppError::Message(format!("create workspace database snapshot: {error}"))
+    })?;
+    let snapshot_conn = Connection::open_with_flags(&snapshot, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(|error| AppError::Message(format!("open workspace database snapshot: {error}")))?;
     let schema_version = db::migrations::current_version(&snapshot_conn)?;
     let counts = workspace_counts(&snapshot_conn)?;
     let mut payload = vec![
-        payload_file(snapshot, DATABASE_PATH)?,
-        payload_file(readme, README_PATH)?,
+        payload_file(snapshot, DATABASE_PATH)
+            .map_err(|error| AppError::Message(format!("hash workspace database: {error}")))?,
+        payload_file(readme, README_PATH)
+            .map_err(|error| AppError::Message(format!("hash workspace README: {error}")))?,
     ];
     let (attachment_references, missing_references) =
-        stage_attachments(&snapshot_conn, staging.path(), &mut payload)?;
+        stage_attachments(&snapshot_conn, staging.path(), &mut payload)
+            .map_err(|error| AppError::Message(format!("stage workspace attachments: {error}")))?;
     drop(snapshot_conn);
     collect_tree_files(
         &db.data_dir.join("media"),
         &db.data_dir.join("media"),
         "media",
         &mut payload,
-    )?;
+    )
+    .map_err(|error| AppError::Message(format!("collect workspace media: {error}")))?;
     drop(conn);
     payload.sort_by(|left, right| left.path.cmp(&right.path));
 

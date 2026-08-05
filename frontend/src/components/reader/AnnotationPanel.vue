@@ -112,9 +112,21 @@ async function exportMd() {
         <div v-if="a.page != null" class="muted" style="font-size: 0.75rem; margin-top: 4px">
           стр. {{ a.page }}
         </div>
+        <div
+          v-if="a.anchor_status === 'needs_review'"
+          class="anchor-warning"
+        >
+          Требует проверки
+        </div>
+        <div v-else-if="a.anchor_status === 'rebound'" class="muted anchor-state">
+          Перепривязано после обновления
+        </div>
         <div style="font-size: 0.85rem; margin-top: 4px; line-height: 1.35">
           {{ labelFor(a) }}
         </div>
+        <blockquote v-if="a.selected_text" class="selected-text">
+          {{ a.selected_text }}
+        </blockquote>
       </div>
     </div>
   </div>
@@ -150,5 +162,25 @@ async function exportMd() {
   border-radius: 50%;
   border: 1px solid var(--border);
   padding: 0;
+}
+.anchor-warning {
+  margin-top: 6px;
+  color: var(--danger);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.anchor-state {
+  margin-top: 6px;
+  font-size: 0.72rem;
+}
+.selected-text {
+  margin: 6px 0 0;
+  padding-left: 8px;
+  border-left: 2px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  line-height: 1.35;
+  max-height: 5.4em;
+  overflow: hidden;
 }
 </style>

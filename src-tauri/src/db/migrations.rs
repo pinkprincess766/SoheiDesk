@@ -167,6 +167,40 @@ const MIGRATIONS: &[Migration] = &[
             ON journal_drafts(entry_id);
         "#,
     },
+    Migration {
+        version: 5,
+        name: "resilient document identity and annotation anchors",
+        sql: r#"
+        ALTER TABLE documents ADD COLUMN sha256 TEXT;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_sha256
+            ON documents(sha256) WHERE sha256 IS NOT NULL;
+
+        ALTER TABLE annotations ADD COLUMN selected_text TEXT;
+        ALTER TABLE annotations ADD COLUMN context_before TEXT;
+        ALTER TABLE annotations ADD COLUMN context_after TEXT;
+        ALTER TABLE annotations ADD COLUMN anchor_status TEXT NOT NULL DEFAULT 'attached'
+            CHECK(anchor_status IN ('attached', 'rebound', 'needs_review'));
+        ALTER TABLE annotations ADD COLUMN source_sha256 TEXT;
+
+        CREATE TABLE document_versions (
+            id TEXT PRIMARY KEY,
+            document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+            sha256 TEXT,
+            legacy_hash TEXT,
+            file_size INTEGER,
+            path TEXT,
+            title TEXT,
+            change_kind TEXT NOT NULL CHECK(change_kind IN (
+                'added', 'verified', 'moved', 'alternate_path',
+                'content_changed', 'imported'
+            )),
+            observed_at TEXT NOT NULL
+        );
+
+        CREATE INDEX idx_document_versions_document
+            ON document_versions(document_id, observed_at DESC);
+        "#,
+    },
 ];
 
 fn table_exists(conn: &Connection, table: &str) -> AppResult<bool> {
@@ -450,6 +484,7 @@ mod tests {
                 "rss_items",
                 "plugins",
                 "journal_drafts",
+                "document_versions",
             ] {
                 assert!(
                     has_table(&conn, table),
@@ -478,14 +513,14 @@ mod tests {
 
     #[test]
     fn backup_hook_runs_before_schema_mutation() {
-        let mut conn = database_at_version(3);
+        let mut conn = database_at_version(4);
         apply_with_hook(&mut conn, |connection, from, to| {
-            assert_eq!((from, to), (3, 4));
-            assert!(!has_table(connection, "journal_drafts"));
+            assert_eq!((from, to), (4, 5));
+            assert!(!has_table(connection, "document_versions"));
             Ok(())
         })
         .expect("migration with backup hook");
-        assert!(has_table(&conn, "journal_drafts"));
+        assert!(has_table(&conn, "document_versions"));
     }
 
     #[test]
@@ -667,6 +702,6 @@ mod tests {
         )
         .expect("verified migrations");
 
-        assert_eq!(verified, vec![1, 2, 3, 4]);
+        assert_eq!(verified, (1..=latest_version()).collect::<Vec<_>>());
     }
 }

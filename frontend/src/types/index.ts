@@ -9,12 +9,26 @@ export interface AppInfo {
 export interface DocumentRecord {
   id: string;
   content_hash: string;
+  sha256: string | null;
   title: string | null;
   last_path: string | null;
   doc_type: DocType | string;
   file_size: number | null;
   added_at: string;
   last_opened_at: string | null;
+  version_count: number;
+}
+
+export interface DocumentVersion {
+  id: string;
+  document_id: string;
+  sha256: string | null;
+  legacy_hash: string | null;
+  file_size: number | null;
+  path: string | null;
+  title: string | null;
+  change_kind: string;
+  observed_at: string;
 }
 
 export interface OpenedDocument {
@@ -33,6 +47,10 @@ export interface OpenedDocument {
 export interface OpenResult {
   document: DocumentRecord;
   opened: OpenedDocument;
+  movement_detected: boolean;
+  content_changed: boolean;
+  annotations_rebound: number;
+  annotations_needing_review: number;
 }
 
 export interface TemplateField {
@@ -106,6 +124,11 @@ export interface Annotation {
   position_json: string;
   content: string | null;
   color: string | null;
+  selected_text: string | null;
+  context_before: string | null;
+  context_after: string | null;
+  anchor_status: "attached" | "rebound" | "needs_review";
+  source_sha256: string | null;
   created_at: string;
   updated_at: string;
 }

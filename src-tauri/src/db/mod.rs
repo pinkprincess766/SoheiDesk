@@ -83,6 +83,17 @@ where
     f(&conn)
 }
 
+pub fn with_conn_mut<F, T>(state: &DbState, f: F) -> AppResult<T>
+where
+    F: FnOnce(&mut Connection) -> AppResult<T>,
+{
+    let mut conn = state
+        .conn
+        .lock()
+        .map_err(|_| AppError::Message("database lock poisoned".into()))?;
+    f(&mut conn)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,10 +184,21 @@ mod tests {
         .expect("open with migration backup");
 
         let backups = crate::backup::list_backups(&directory.0).expect("backups");
-        assert_eq!(backups.len(), 1);
-        assert_eq!(backups[0].kind, crate::backup::BackupKind::PreMigration);
-        assert_eq!(backups[0].schema_version, 3);
-        assert!(backups[0].readable);
-        assert_eq!(migrations::current_version(&conn).expect("version"), 4);
+        assert_eq!(backups.len(), 2);
+        assert!(backups
+            .iter()
+            .all(|backup| backup.kind == crate::backup::BackupKind::PreMigration));
+        assert_eq!(
+            backups
+                .iter()
+                .map(|backup| backup.schema_version)
+                .collect::<std::collections::BTreeSet<_>>(),
+            [3, 4].into_iter().collect()
+        );
+        assert!(backups.iter().all(|backup| backup.readable));
+        assert_eq!(
+            migrations::current_version(&conn).expect("version"),
+            migrations::latest_version()
+        );
     }
 }

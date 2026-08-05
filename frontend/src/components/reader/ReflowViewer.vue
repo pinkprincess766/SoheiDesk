@@ -82,6 +82,13 @@ async function onMouseUp() {
   await nextTick();
   const pos = getSelectionOffsets();
   if (!pos) return;
+  const selectedText = (contentRef.value?.textContent || "").slice(
+    pos.start_offset,
+    pos.end_offset,
+  );
+  const fullText = contentRef.value?.textContent || "";
+  const contextBefore = fullText.slice(Math.max(0, pos.start_offset - 120), pos.start_offset);
+  const contextAfter = fullText.slice(pos.end_offset, pos.end_offset + 120);
 
   let content: string | null = null;
   if (annotations.mode === "comment") {
@@ -99,6 +106,9 @@ async function onMouseUp() {
     position_json: JSON.stringify(pos),
     content,
     color: annotations.activeColor,
+    selected_text: selectedText,
+    context_before: contextBefore,
+    context_after: contextAfter,
   });
   window.getSelection()?.removeAllRanges();
   await nextTick();
@@ -113,6 +123,7 @@ function applyHighlights() {
 
   const full = el.textContent || "";
   const marks = annotations.items
+    .filter((a) => a.anchor_status !== "needs_review")
     .map((a) => ({ a, pos: parsePos(a) }))
     .filter((x): x is { a: Annotation; pos: ReflowPosition } => !!x.pos)
     .sort((x, y) => y.pos.start_offset - x.pos.start_offset);

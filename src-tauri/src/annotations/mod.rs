@@ -15,6 +15,11 @@ pub struct Annotation {
     pub position_json: String,
     pub content: Option<String>,
     pub color: Option<String>,
+    pub selected_text: Option<String>,
+    pub context_before: Option<String>,
+    pub context_after: Option<String>,
+    pub anchor_status: String,
+    pub source_sha256: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -27,6 +32,9 @@ pub struct AnnotationInput {
     pub position_json: String,
     pub content: Option<String>,
     pub color: Option<String>,
+    pub selected_text: Option<String>,
+    pub context_before: Option<String>,
+    pub context_after: Option<String>,
 }
 
 const ALLOWED_TYPES: &[&str] = &[
@@ -37,6 +45,11 @@ const ALLOWED_TYPES: &[&str] = &[
     "ellipse",
     "arrow",
 ];
+const MAX_POSITION_BYTES: usize = 128 * 1024;
+const MAX_CONTENT_BYTES: usize = 64 * 1024;
+const MAX_SELECTED_TEXT_BYTES: usize = 32 * 1024;
+const MAX_CONTEXT_BYTES: usize = 4 * 1024;
+const DEFAULT_COLOR: &str = "#f7e07c";
 
 fn map_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Annotation> {
     Ok(Annotation {
@@ -47,15 +60,22 @@ fn map_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Annotation> {
         position_json: row.get(4)?,
         content: row.get(5)?,
         color: row.get(6)?,
-        created_at: row.get(7)?,
-        updated_at: row.get(8)?,
+        selected_text: row.get(7)?,
+        context_before: row.get(8)?,
+        context_after: row.get(9)?,
+        anchor_status: row.get(10)?,
+        source_sha256: row.get(11)?,
+        created_at: row.get(12)?,
+        updated_at: row.get(13)?,
     })
 }
 
 pub fn list_for_document(db: &DbState, document_id: &str) -> AppResult<Vec<Annotation>> {
     with_conn(db, |conn| {
         let mut stmt = conn.prepare(
-            "SELECT id, document_id, ann_type, page, position_json, content, color, created_at, updated_at
+            "SELECT id, document_id, ann_type, page, position_json, content, color,
+                    selected_text, context_before, context_after, anchor_status, source_sha256,
+                    created_at, updated_at
              FROM annotations WHERE document_id = ?1 ORDER BY created_at ASC",
         )?;
         let rows = stmt.query_map(params![document_id], map_row)?;
@@ -74,15 +94,45 @@ pub fn create(db: &DbState, input: AnnotationInput) -> AppResult<Annotation> {
             ALLOWED_TYPES.join(", ")
         )));
     }
-    let _: serde_json::Value = serde_json::from_str(&input.position_json)
+    validate_size("position_json", &input.position_json, MAX_POSITION_BYTES)?;
+    validate_optional_size("content", input.content.as_deref(), MAX_CONTENT_BYTES)?;
+    validate_optional_size(
+        "selected_text",
+        input.selected_text.as_deref(),
+        MAX_SELECTED_TEXT_BYTES,
+    )?;
+    validate_optional_size(
+        "context_before",
+        input.context_before.as_deref(),
+        MAX_CONTEXT_BYTES,
+    )?;
+    validate_optional_size(
+        "context_after",
+        input.context_after.as_deref(),
+        MAX_CONTEXT_BYTES,
+    )?;
+    let position: serde_json::Value = serde_json::from_str(&input.position_json)
         .map_err(|e| AppError::Message(format!("invalid position_json: {e}")))?;
+    if !position.is_object() {
+        return Err(AppError::Message(
+            "position_json must be a JSON object".into(),
+        ));
+    }
+    let color = input.color.unwrap_or_else(|| DEFAULT_COLOR.into());
+    validate_color(&color)?;
 
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
     with_conn(db, |conn| {
         conn.execute(
-            "INSERT INTO annotations (id, document_id, ann_type, page, position_json, content, color, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
+            "INSERT INTO annotations (
+                id, document_id, ann_type, page, position_json, content, color,
+                selected_text, context_before, context_after, anchor_status, source_sha256,
+                created_at, updated_at
+             ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'attached',
+                (SELECT sha256 FROM documents WHERE id = ?2), ?11, ?11
+             )",
             params![
                 id,
                 input.document_id,
@@ -90,7 +140,10 @@ pub fn create(db: &DbState, input: AnnotationInput) -> AppResult<Annotation> {
                 input.page,
                 input.position_json,
                 input.content,
-                input.color.unwrap_or_else(|| "#f7e07c".into()),
+                color,
+                normalize(input.selected_text),
+                normalize(input.context_before),
+                normalize(input.context_after),
                 now
             ],
         )?;
@@ -102,7 +155,9 @@ pub fn create(db: &DbState, input: AnnotationInput) -> AppResult<Annotation> {
 pub fn get(db: &DbState, id: &str) -> AppResult<Annotation> {
     with_conn(db, |conn| {
         conn.query_row(
-            "SELECT id, document_id, ann_type, page, position_json, content, color, created_at, updated_at
+            "SELECT id, document_id, ann_type, page, position_json, content, color,
+                    selected_text, context_before, context_after, anchor_status, source_sha256,
+                    created_at, updated_at
              FROM annotations WHERE id = ?1",
             params![id],
             map_row,
@@ -117,6 +172,10 @@ pub fn update(
     content: Option<String>,
     color: Option<String>,
 ) -> AppResult<Annotation> {
+    validate_optional_size("content", content.as_deref(), MAX_CONTENT_BYTES)?;
+    if let Some(color) = color.as_deref() {
+        validate_color(color)?;
+    }
     let now = Utc::now().to_rfc3339();
     with_conn(db, |conn| {
         conn.execute(
@@ -163,6 +222,14 @@ pub fn export_markdown(db: &DbState, document_id: &str, doc_title: &str) -> AppR
                 md.push_str(&format!("- note: {c}\n"));
             }
         }
+        if a.anchor_status == "needs_review" {
+            md.push_str("- anchor: **Needs review**\n");
+        } else if a.anchor_status == "rebound" {
+            md.push_str("- anchor: rebound after document update\n");
+        }
+        if let Some(selected) = &a.selected_text {
+            md.push_str(&format!("\n> {}\n", selected.replace('\n', " ")));
+        }
         // try quote from position
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&a.position_json) {
             if let Some(q) = v.get("quote").and_then(|x| x.as_str()) {
@@ -183,6 +250,44 @@ pub fn export_markdown(db: &DbState, document_id: &str, doc_title: &str) -> AppR
     Ok(md)
 }
 
+fn normalize(value: Option<String>) -> Option<String> {
+    value.and_then(|value| {
+        if value.trim().is_empty() {
+            None
+        } else {
+            Some(value)
+        }
+    })
+}
+
+fn validate_size(field: &str, value: &str, maximum: usize) -> AppResult<()> {
+    if value.len() > maximum {
+        return Err(AppError::Message(format!(
+            "{field} is too large (maximum {maximum} bytes)"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_optional_size(field: &str, value: Option<&str>, maximum: usize) -> AppResult<()> {
+    if let Some(value) = value {
+        validate_size(field, value, maximum)?;
+    }
+    Ok(())
+}
+
+fn validate_color(color: &str) -> AppResult<()> {
+    if matches!(color.len(), 7 | 9)
+        && color.starts_with('#')
+        && color[1..].bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Ok(());
+    }
+    Err(AppError::Message(
+        "color must be a 6- or 8-digit hexadecimal value".into(),
+    ))
+}
+
 pub fn export_markdown_to_path(
     db: &DbState,
     document_id: &str,
@@ -191,4 +296,23 @@ pub fn export_markdown_to_path(
 ) -> AppResult<()> {
     let md = export_markdown(db, document_id, doc_title)?;
     atomic_file::write_bytes(path, md.as_bytes())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validates_bounded_hex_colors() {
+        assert!(validate_color("#aabbcc").is_ok());
+        assert!(validate_color("#aabbccdd").is_ok());
+        assert!(validate_color("red; background:url(file:///tmp/x)").is_err());
+        assert!(validate_color("#abcd").is_err());
+    }
+
+    #[test]
+    fn rejects_oversized_anchor_fields() {
+        let oversized = "x".repeat(MAX_CONTEXT_BYTES + 1);
+        assert!(validate_optional_size("context", Some(&oversized), MAX_CONTEXT_BYTES).is_err());
+    }
 }

@@ -53,6 +53,7 @@ const rendered = computed(() => {
   type Mark = { start: number; end: number; color: string; title: string; kind: string };
   const marks: Mark[] = [];
   for (const a of annotations.items) {
+    if (a.anchor_status === "needs_review") continue;
     const pos = parsePos(a);
     if (!pos) continue;
     marks.push({
@@ -194,6 +195,7 @@ async function confirmTool() {
     return;
   }
   const quote = plain.value.slice(r.start, r.end).slice(0, 200);
+  const selectedText = plain.value.slice(r.start, r.end);
   if (tool.value === "comment") {
     commentDraft.value = "";
     commentOpen.value = true;
@@ -210,6 +212,9 @@ async function confirmTool() {
     } satisfies ReflowPosition),
     content: quote || "выделение",
     color: annotations.activeColor,
+    selected_text: selectedText,
+    context_before: plain.value.slice(Math.max(0, r.start - 120), r.start),
+    context_after: plain.value.slice(r.end, r.end + 120),
   });
   cancelTool();
 }
@@ -227,6 +232,7 @@ async function submitComment() {
     return;
   }
   const quote = plain.value.slice(r.start, r.end).slice(0, 200);
+  const selectedText = plain.value.slice(r.start, r.end);
   await annotations.create({
     document_id: props.documentId,
     ann_type: "comment",
@@ -238,6 +244,9 @@ async function submitComment() {
     } satisfies ReflowPosition),
     content: note,
     color: annotations.activeColor,
+    selected_text: selectedText,
+    context_before: plain.value.slice(Math.max(0, r.start - 120), r.start),
+    context_after: plain.value.slice(r.end, r.end + 120),
   });
   commentOpen.value = false;
   cancelTool();

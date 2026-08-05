@@ -468,7 +468,11 @@ fn stage_attachments(
         } else {
             let temporary = target.join(format!(".copy-{}", Uuid::new_v4().simple()));
             fs::copy(&canonical, &temporary)?;
-            File::open(&temporary)?.sync_all()?;
+            let copied = File::open(&temporary)?;
+            copied.sync_all()?;
+            // Windows refuses to rename a staged attachment while any handle
+            // remains open, even when the rename stays within one directory.
+            drop(copied);
             let (_, file_sha256) = backup::hash_file(&temporary)?;
             let path_sha256 = hex::encode(Sha256::digest(canonical.to_string_lossy().as_bytes()));
             let name = format!(
@@ -479,7 +483,9 @@ fn stage_attachments(
             );
             let relative = format!("attachments/{name}");
             let final_path = target.join(&name);
-            fs::rename(&temporary, &final_path)?;
+            fs::rename(&temporary, &final_path).map_err(|error| {
+                AppError::Message(format!("finalize staged attachment: {error}"))
+            })?;
             payload.push(payload_file(final_path, &relative)?);
             staged.insert(canonical, relative.clone());
             relative
@@ -959,10 +965,12 @@ pub fn export_workspace(
         destination,
         |file| write_archive(file, &payload, &manifest),
         |temporary| {
-            let _verified = validate_and_extract(temporary)?;
+            let verified = validate_and_extract(temporary)?;
+            drop(verified);
             Ok(())
         },
-    )?;
+    )
+    .map_err(|error| AppError::Message(format!("finalize workspace archive: {error}")))?;
     let attachment_count = manifest
         .files
         .iter()

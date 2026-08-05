@@ -251,13 +251,7 @@ pub fn export_markdown(db: &DbState, document_id: &str, doc_title: &str) -> AppR
 }
 
 fn normalize(value: Option<String>) -> Option<String> {
-    value.and_then(|value| {
-        if value.trim().is_empty() {
-            None
-        } else {
-            Some(value)
-        }
-    })
+    value.filter(|value| !value.trim().is_empty())
 }
 
 fn validate_size(field: &str, value: &str, maximum: usize) -> AppResult<()> {

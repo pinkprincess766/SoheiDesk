@@ -21,7 +21,8 @@ use uuid::Uuid;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
-pub const BACKUP_FORMAT_VERSION: u32 = 1;
+pub const BACKUP_FORMAT_VERSION: u32 = 2;
+const MIN_SUPPORTED_BACKUP_FORMAT_VERSION: u32 = 1;
 const DATABASE_ARCHIVE_PATH: &str = "database/soheidesk.sqlite";
 const SETTINGS_ARCHIVE_PATH: &str = "user-data/settings.json";
 const TEMPLATES_ARCHIVE_PATH: &str = "user-data/templates.json";
@@ -125,6 +126,13 @@ struct ExtractedBackup {
     _staging: TempDir,
     database: PathBuf,
     media: PathBuf,
+    attachments: PathBuf,
+}
+
+pub(crate) struct SnapshotRestoreResult {
+    pub(crate) emergency: BackupInfo,
+    pub(crate) reindexed_items: Option<u64>,
+    pub(crate) warning: Option<String>,
 }
 
 struct TempDir {
@@ -191,7 +199,7 @@ fn table_exists(conn: &Connection, table: &str) -> AppResult<bool> {
     )?)
 }
 
-fn create_sqlite_snapshot(source: &Connection, destination: &Path) -> AppResult<()> {
+pub(crate) fn create_sqlite_snapshot(source: &Connection, destination: &Path) -> AppResult<()> {
     let mut destination_conn = Connection::open(destination)?;
     // Copy in small steps so SQLite can release source locks between batches.
     let backup = Backup::new(source, &mut destination_conn)?;
@@ -201,7 +209,7 @@ fn create_sqlite_snapshot(source: &Connection, destination: &Path) -> AppResult<
     Ok(())
 }
 
-fn verify_database(conn: &Connection) -> AppResult<()> {
+pub(crate) fn verify_database(conn: &Connection) -> AppResult<()> {
     let result: String = conn.query_row("PRAGMA integrity_check(1)", [], |row| row.get(0))?;
     if result != "ok" {
         return Err(AppError::Message(format!(
@@ -285,7 +293,7 @@ fn dump_templates(conn: &Connection, destination: &Path) -> AppResult<()> {
     Ok(())
 }
 
-fn hash_file(path: &Path) -> AppResult<(u64, String)> {
+pub(crate) fn hash_file(path: &Path) -> AppResult<(u64, String)> {
     let mut file = File::open(path)?;
     let mut hasher = Sha256::new();
     let mut size = 0_u64;
@@ -303,9 +311,10 @@ fn hash_file(path: &Path) -> AppResult<(u64, String)> {
     Ok((size, hex::encode(hasher.finalize())))
 }
 
-fn collect_media_files(
+fn collect_tree_files(
     current: &Path,
-    media_root: &Path,
+    root: &Path,
+    archive_prefix: &str,
     payload: &mut Vec<PayloadFile>,
 ) -> AppResult<()> {
     if !current.exists() {
@@ -318,12 +327,12 @@ fn collect_media_files(
         let metadata = fs::symlink_metadata(&path)?;
         if metadata.file_type().is_symlink() {
             return Err(AppError::Message(format!(
-                "backup refuses symlink in media: {}",
+                "backup refuses symlink in app-managed data: {}",
                 path.display()
             )));
         }
         if metadata.is_dir() {
-            collect_media_files(&path, media_root, payload)?;
+            collect_tree_files(&path, root, archive_prefix, payload)?;
             continue;
         }
         if !metadata.is_file() {
@@ -333,8 +342,8 @@ fn collect_media_files(
             )));
         }
         let relative = path
-            .strip_prefix(media_root)
-            .map_err(|_| AppError::Message("invalid media path".into()))?;
+            .strip_prefix(root)
+            .map_err(|_| AppError::Message("invalid backup tree path".into()))?;
         let relative = relative
             .to_str()
             .ok_or_else(|| AppError::Message("media filename is not valid UTF-8".into()))?
@@ -342,7 +351,7 @@ fn collect_media_files(
         let (size, sha256) = hash_file(&path)?;
         payload.push(PayloadFile {
             source: path,
-            archive_path: format!("media/{relative}"),
+            archive_path: format!("{archive_prefix}/{relative}"),
             size,
             sha256,
         });
@@ -418,9 +427,16 @@ pub fn create_archive(
         payload_file(settings, SETTINGS_ARCHIVE_PATH)?,
         payload_file(templates, TEMPLATES_ARCHIVE_PATH)?,
     ];
-    collect_media_files(
+    collect_tree_files(
         &data_dir.join("media"),
         &data_dir.join("media"),
+        "media",
+        &mut payload,
+    )?;
+    collect_tree_files(
+        &data_dir.join("attachments"),
+        &data_dir.join("attachments"),
+        "attachments",
         &mut payload,
     )?;
     payload.sort_by(|left, right| left.archive_path.cmp(&right.archive_path));
@@ -541,10 +557,12 @@ fn validate_archive_path(path: &str) -> AppResult<()> {
 }
 
 fn validate_manifest(manifest: &BackupManifest) -> AppResult<()> {
-    if manifest.format_version != BACKUP_FORMAT_VERSION {
+    if !(MIN_SUPPORTED_BACKUP_FORMAT_VERSION..=BACKUP_FORMAT_VERSION)
+        .contains(&manifest.format_version)
+    {
         return Err(AppError::Message(format!(
-            "unsupported backup format {} (supported: {})",
-            manifest.format_version, BACKUP_FORMAT_VERSION
+            "unsupported backup format {} (supported: {}..={})",
+            manifest.format_version, MIN_SUPPORTED_BACKUP_FORMAT_VERSION, BACKUP_FORMAT_VERSION
         )));
     }
     if manifest.kind == BackupKind::Unknown || Uuid::parse_str(&manifest.id).is_err() {
@@ -571,7 +589,8 @@ fn validate_manifest(manifest: &BackupManifest) -> AppResult<()> {
         let allowed = file.path == DATABASE_ARCHIVE_PATH
             || file.path == SETTINGS_ARCHIVE_PATH
             || file.path == TEMPLATES_ARCHIVE_PATH
-            || file.path.starts_with("media/");
+            || file.path.starts_with("media/")
+            || (manifest.format_version >= 2 && file.path.starts_with("attachments/"));
         if !allowed {
             return Err(AppError::Message(format!(
                 "unexpected backup payload: {}",
@@ -862,10 +881,13 @@ fn validate_and_extract_path(path: &Path) -> AppResult<ExtractedBackup> {
 
     let media = staging.path().join("media");
     fs::create_dir_all(&media)?;
+    let attachments = staging.path().join("attachments");
+    fs::create_dir_all(&attachments)?;
     Ok(ExtractedBackup {
         _staging: staging,
         database,
         media,
+        attachments,
     })
 }
 
@@ -978,18 +1000,21 @@ pub fn create_daily_if_due(db: &DbState, state: &BackupState) -> AppResult<Optio
     Ok(Some(info))
 }
 
-fn replace_media(data_dir: &Path, selected_media: &Path) -> AppResult<Option<PathBuf>> {
-    let current = data_dir.join("media");
-    let rollback = data_dir.join(format!(".media-before-restore-{}", Uuid::new_v4().simple()));
+fn replace_data_tree(data_dir: &Path, name: &str, selected: &Path) -> AppResult<Option<PathBuf>> {
+    let current = data_dir.join(name);
+    let rollback = data_dir.join(format!(
+        ".{name}-before-restore-{}",
+        Uuid::new_v4().simple()
+    ));
     let had_current = current.exists();
     if had_current {
         fs::rename(&current, &rollback)?;
     }
-    if let Err(error) = fs::rename(selected_media, &current) {
+    if let Err(error) = fs::rename(selected, &current) {
         if had_current {
             if let Err(rollback_error) = fs::rename(&rollback, &current) {
                 return Err(AppError::Message(format!(
-                    "media replacement failed ({error}); restoring current media also failed ({rollback_error})"
+                    "{name} replacement failed ({error}); restoring current data also failed ({rollback_error})"
                 )));
             }
         }
@@ -998,15 +1023,15 @@ fn replace_media(data_dir: &Path, selected_media: &Path) -> AppResult<Option<Pat
     Ok(had_current.then_some(rollback))
 }
 
-fn rollback_media(data_dir: &Path, rollback: Option<&Path>) -> AppResult<()> {
-    let current = data_dir.join("media");
+fn rollback_data_tree(data_dir: &Path, name: &str, rollback: Option<&Path>) -> AppResult<()> {
+    let current = data_dir.join(name);
     let failed_restore = data_dir.join(format!(
-        ".media-from-failed-restore-{}",
+        ".{name}-from-failed-restore-{}",
         Uuid::new_v4().simple()
     ));
     let had_current = current.exists();
     if had_current {
-        // Keep the failed restore intact until the previous media is back in place.
+        // Keep the failed restore intact until the previous data tree is back in place.
         fs::rename(&current, &failed_restore)?;
     }
     if let Some(previous) = rollback {
@@ -1018,10 +1043,10 @@ fn rollback_media(data_dir: &Path, rollback: Option<&Path>) -> AppResult<()> {
             };
             return Err(match recovery {
                 Some(recovery_error) => AppError::Message(format!(
-                    "previous media restore failed ({error}); keeping restored media also failed ({recovery_error})"
+                    "previous {name} restore failed ({error}); keeping restored data also failed ({recovery_error})"
                 )),
                 None => AppError::Message(format!(
-                    "previous media restore failed; restored media was preserved: {error}"
+                    "previous {name} restore failed; restored data was preserved: {error}"
                 )),
             });
         }
@@ -1045,7 +1070,53 @@ pub fn restore_backup(
     let selected_stored = find_backup(&db.data_dir, backup_id)?;
     // Validate the selected archive before locking or changing current data.
     let selected = validate_and_extract_path(&selected_stored.path)?;
+    let outcome = restore_snapshot_paths(
+        db,
+        search,
+        &selected.database,
+        &selected.media,
+        &selected.attachments,
+        None,
+    )?;
+    Ok(BackupRestoreResult {
+        restored: stored_to_info(&selected_stored),
+        emergency: outcome.emergency,
+        reindexed_items: outcome.reindexed_items,
+        warning: outcome.warning,
+    })
+}
 
+pub(crate) fn restore_external_snapshot(
+    db: &DbState,
+    state: &BackupState,
+    search: &crate::search::SearchState,
+    database: &Path,
+    media: &Path,
+    attachments: &Path,
+    expected_current_sha256: &str,
+) -> AppResult<SnapshotRestoreResult> {
+    let _operation = state
+        .operation
+        .lock()
+        .map_err(|_| AppError::Message("backup lock poisoned".into()))?;
+    restore_snapshot_paths(
+        db,
+        search,
+        database,
+        media,
+        attachments,
+        Some(expected_current_sha256),
+    )
+}
+
+fn restore_snapshot_paths(
+    db: &DbState,
+    search: &crate::search::SearchState,
+    selected_database: &Path,
+    selected_media: &Path,
+    selected_attachments: &Path,
+    expected_current_sha256: Option<&str>,
+) -> AppResult<SnapshotRestoreResult> {
     let _media = db
         .media
         .lock()
@@ -1057,12 +1128,36 @@ pub fn restore_backup(
     let emergency_info = create_archive(&db.data_dir, &conn, BackupKind::Emergency, None)?;
     let emergency_stored = find_backup(&db.data_dir, &emergency_info.id)?;
     let emergency = validate_and_extract_path(&emergency_stored.path)?;
+    if let Some(expected) = expected_current_sha256 {
+        let (_, actual) = hash_file(&emergency.database)?;
+        if actual != expected {
+            return Err(AppError::Message(
+                "workspace changed after import preview; run preview again before importing".into(),
+            ));
+        }
+    }
 
-    let media_rollback = replace_media(&db.data_dir, &selected.media)?;
+    let media_rollback = replace_data_tree(&db.data_dir, "media", selected_media)?;
+    let attachments_rollback = match replace_data_tree(
+        &db.data_dir,
+        "attachments",
+        selected_attachments,
+    ) {
+        Ok(rollback) => rollback,
+        Err(error) => {
+            let media_status = rollback_data_tree(&db.data_dir, "media", media_rollback.as_deref());
+            return match media_status {
+                Ok(()) => Err(error),
+                Err(rollback_error) => Err(AppError::Message(format!(
+                    "attachments replacement failed ({error}); media rollback also failed ({rollback_error})"
+                ))),
+            };
+        }
+    };
     let restore_result = conn
         .restore(
             DatabaseName::Main,
-            &selected.database,
+            selected_database,
             None::<fn(rusqlite::backup::Progress)>,
         )
         .map_err(AppError::from)
@@ -1093,12 +1188,14 @@ pub fn restore_backup(
                 conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")?;
                 verify_database(&conn)
             });
-        let media_rollback = rollback_media(&db.data_dir, media_rollback.as_deref());
-        return match (database_rollback, media_rollback) {
-            (Ok(()), Ok(())) => Err(AppError::Message(format!(
+        let media_result = rollback_data_tree(&db.data_dir, "media", media_rollback.as_deref());
+        let attachments_result =
+            rollback_data_tree(&db.data_dir, "attachments", attachments_rollback.as_deref());
+        return match (database_rollback, media_result, attachments_result) {
+            (Ok(()), Ok(()), Ok(())) => Err(AppError::Message(format!(
                 "restore failed and current data was rolled back: {error}"
             ))),
-            (database_result, media_result) => {
+            (database_result, media_result, attachments_result) => {
                 let database_status = database_result
                     .err()
                     .map(|value| value.to_string())
@@ -1107,19 +1204,29 @@ pub fn restore_backup(
                     .err()
                     .map(|value| value.to_string())
                     .unwrap_or_else(|| "ok".into());
+                let attachments_status = attachments_result
+                    .err()
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "ok".into());
                 Err(AppError::Message(format!(
-                    "restore failed ({error}); rollback was incomplete (database: {database_status}; media: {media_status}). Emergency backup: {}",
+                    "restore failed ({error}); rollback was incomplete (database: {database_status}; media: {media_status}; attachments: {attachments_status}). Emergency backup: {}",
                     emergency_info.file_name
                 )))
             }
         };
     }
     drop(conn);
-    let cleanup_warning = media_rollback.and_then(|previous_media| {
-        fs::remove_dir_all(&previous_media)
-            .err()
-            .map(|error| format!("Old media cleanup failed: {error}"))
-    });
+    let mut cleanup_warnings = Vec::new();
+    for (name, rollback) in [
+        ("media", media_rollback),
+        ("attachments", attachments_rollback),
+    ] {
+        if let Some(previous) = rollback {
+            if let Err(error) = fs::remove_dir_all(previous) {
+                cleanup_warnings.push(format!("Old {name} cleanup failed: {error}"));
+            }
+        }
+    }
 
     let mut warnings = Vec::new();
     if let Err(error) = crate::templates::seed_builtins(db) {
@@ -1141,16 +1248,13 @@ pub fn restore_backup(
             None
         }
     };
-    if let Some(cleanup_warning) = cleanup_warning {
-        warnings.push(cleanup_warning);
-    }
+    warnings.extend(cleanup_warnings);
     let warning = if warnings.is_empty() {
         None
     } else {
         Some(warnings.join("; "))
     };
-    Ok(BackupRestoreResult {
-        restored: stored_to_info(&selected_stored),
+    Ok(SnapshotRestoreResult {
         emergency: emergency_info,
         reindexed_items,
         warning,
@@ -1244,6 +1348,8 @@ mod tests {
         let directory = TestDir::new();
         fs::create_dir_all(directory.0.join("media/doc-1")).expect("media directory");
         fs::write(directory.0.join("media/doc-1/page.png"), b"image").expect("media");
+        fs::create_dir_all(directory.0.join("attachments")).expect("attachments directory");
+        fs::write(directory.0.join("attachments/source.csv"), b"data").expect("attachment");
         fs::create_dir_all(directory.0.join("tantivy_index")).expect("index directory");
         fs::write(directory.0.join("tantivy_index/index"), b"rebuild me").expect("index");
         let database_path = directory.0.join("soheidesk.sqlite");
@@ -1268,6 +1374,7 @@ mod tests {
         let extracted = validate_and_extract_path(&stored.path).expect("valid backup");
         assert!(extracted.database.exists());
         assert!(extracted.media.join("doc-1/page.png").exists());
+        assert!(extracted.attachments.join("source.csv").exists());
         let snapshot = Connection::open(&extracted.database).expect("snapshot database");
         let theme: String = snapshot
             .query_row(
@@ -1336,7 +1443,7 @@ mod tests {
         fs::create_dir(&previous).expect("previous media");
         fs::write(previous.join("state.txt"), b"original").expect("original media");
 
-        rollback_media(&directory.0, Some(&previous)).expect("media rollback");
+        rollback_data_tree(&directory.0, "media", Some(&previous)).expect("media rollback");
         assert_eq!(
             fs::read(current.join("state.txt")).expect("restored media"),
             b"original"
@@ -1346,7 +1453,8 @@ mod tests {
         fs::create_dir(&current).expect("recreate current media");
         fs::write(current.join("state.txt"), b"selected").expect("selected media");
         let missing = directory.0.join("missing-previous-media");
-        rollback_media(&directory.0, Some(&missing)).expect_err("missing previous media");
+        rollback_data_tree(&directory.0, "media", Some(&missing))
+            .expect_err("missing previous media");
         assert_eq!(
             fs::read(current.join("state.txt")).expect("preserved selected media"),
             b"selected"
@@ -1425,6 +1533,12 @@ mod tests {
         let directory = TestDir::new();
         fs::create_dir_all(directory.0.join("media")).expect("media directory");
         fs::write(directory.0.join("media/state.txt"), b"original").expect("original media");
+        fs::create_dir_all(directory.0.join("attachments")).expect("attachments directory");
+        fs::write(
+            directory.0.join("attachments/state.txt"),
+            b"original attachment",
+        )
+        .expect("original attachment");
         let conn = test_database(&directory.0.join("soheidesk.sqlite"));
         let db = DbState {
             conn: Mutex::new(conn),
@@ -1441,6 +1555,11 @@ mod tests {
                 .expect("change setting");
         }
         fs::write(directory.0.join("media/state.txt"), b"changed").expect("changed media");
+        fs::write(
+            directory.0.join("attachments/state.txt"),
+            b"changed attachment",
+        )
+        .expect("changed attachment");
 
         let restored = restore_backup(&db, &state, &search, &original.id).expect("restore");
         assert_eq!(restored.emergency.kind, BackupKind::Emergency);
@@ -1459,6 +1578,10 @@ mod tests {
         assert_eq!(
             fs::read(directory.0.join("media/state.txt")).expect("restored media"),
             b"original"
+        );
+        assert_eq!(
+            fs::read(directory.0.join("attachments/state.txt")).expect("restored attachment"),
+            b"original attachment"
         );
         let emergency =
             find_backup(&directory.0, &restored.emergency.id).expect("emergency backup");
@@ -1533,5 +1656,14 @@ mod tests {
             .expect_err("negative schema")
             .to_string()
             .contains("negative schema version"));
+
+        future.schema_version = db::migrations::latest_version();
+        future.format_version = 1;
+        validate_manifest(&future).expect("legacy v1 backup remains supported");
+        future.files.push(required("attachments/not-in-v1.txt"));
+        assert!(validate_manifest(&future)
+            .expect_err("v1 attachment payload")
+            .to_string()
+            .contains("unexpected backup payload"));
     }
 }

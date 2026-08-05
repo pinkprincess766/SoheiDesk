@@ -177,3 +177,53 @@ export interface BackupRestoreResult {
   reindexed_items: number | null;
   warning: string | null;
 }
+
+export interface WorkspaceCounts {
+  settings: number;
+  documents: number;
+  annotations: number;
+  journal_entries: number;
+  journal_drafts: number;
+  user_templates: number;
+  user_export_templates: number;
+  bibliography_items: number;
+  rss_feeds: number;
+  rss_items: number;
+  plugins: number;
+}
+
+export interface WorkspaceExportResult {
+  path: string;
+  created_at: string;
+  schema_version: number;
+  counts: WorkspaceCounts;
+  file_count: number;
+  total_size: number;
+  attachment_count: number;
+  media_count: number;
+  missing_references: string[];
+}
+
+export interface WorkspacePreview {
+  token: string;
+  file_name: string;
+  created_at: string;
+  app_version: string;
+  schema_version: number;
+  compatibility: "compatible" | "upgrade_required";
+  counts: WorkspaceCounts;
+  current_counts: WorkspaceCounts;
+  file_count: number;
+  total_size: number;
+  attachment_count: number;
+  media_count: number;
+  missing_references: string[];
+  requires_replacement_confirmation: boolean;
+}
+
+export interface WorkspaceImportResult {
+  imported_counts: WorkspaceCounts;
+  emergency: BackupInfo;
+  reindexed_items: number | null;
+  warning: string | null;
+}

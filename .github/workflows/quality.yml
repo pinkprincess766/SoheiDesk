@@ -92,4 +92,14 @@ jobs:
           workspaces: src-tauri -> target
       # This executes the platform-specific atomic replacement path used by
       # exports instead of merely type-checking it on Unix CI.
-      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+      - name: Run Rust tests
+        shell: pwsh
+        run: |
+          cargo test --manifest-path src-tauri/Cargo.toml --locked 2>&1 | Tee-Object -FilePath rust-windows.log
+          $status = $LASTEXITCODE
+          if ($status -ne 0) {
+            $diagnostic = (Get-Content rust-windows.log -Tail 40) -join "`n"
+            $diagnostic = $diagnostic.Replace("%", "%25").Replace("`r", "%0D").Replace("`n", "%0A")
+            Write-Output "::error title=Rust Windows::$diagnostic"
+            exit $status
+          }

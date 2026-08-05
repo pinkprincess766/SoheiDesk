@@ -35,6 +35,7 @@ required.
 | Journal | Built-in and custom templates, attachments, preview, and export |
 | Draft safety | Journal and template drafts are autosaved to SQLite and can be restored explicitly |
 | Backups | Daily, pre-migration, and manual backups with verified restore and an automatic emergency copy |
+| Data portability | Preview-gated full workspace export/import using a documented ZIP, SQLite, and plain files |
 | Library and search | Local document history plus full-text search across documents and journal entries |
 | Export | Markdown, HTML, Typst, LaTeX, and DOCX output |
 | References | DOI lookup, arXiv/PubMed search, bibliography export, and read-only Zotero import |
@@ -121,6 +122,14 @@ restore verifies all SHA-256 checksums and runs SQLite `integrity_check` before
 current data is changed. The archive layout is documented in
 [docs/architecture/backup-format.md](./docs/architecture/backup-format.md).
 
+A separate **portable workspace export** is available in Settings for moving or
+archiving all user data. It is a standard ZIP containing `database.sqlite`,
+copied source attachments, app-managed media, a checksum manifest, and a plain
+text README. Import validates the entire package, shows a preview, requires an
+explicit replacement confirmation for a non-empty workspace, and creates an
+emergency backup first. The format is documented in
+[docs/architecture/workspace-portability.md](./docs/architecture/workspace-portability.md).
+
 Database upgrades fail closed. SoheiDesk rejects unknown newer or malformed
 schema histories, backs up an existing database before each migration, applies
 each step transactionally, and checks SQLite both before and after commit. The
@@ -135,9 +144,10 @@ and JSON templates; implementation details are documented in
 [docs/architecture/atomic-file-writes.md](./docs/architecture/atomic-file-writes.md).
 
 SoheiDesk is under active development and is not a validated electronic
-laboratory notebook. Source documents opened from locations outside the app
-data directory are not guaranteed to be copied into a SoheiDesk backup; keep
-normal backups of those originals as well.
+laboratory notebook. Automatic recovery backups protect app-managed data. Use
+the portable workspace export when external source documents and journal file
+fields must travel with the database, and keep normal backups of the originals
+as well.
 
 ## Build from source
 

@@ -15,6 +15,7 @@ mod ocr;
 mod parsers;
 mod pending_open;
 mod plugins;
+mod portability;
 mod rss;
 mod search;
 mod templates;
@@ -22,6 +23,7 @@ mod templates;
 use backup::BackupState;
 use collab::CollabState;
 use pending_open::PendingOpen;
+use portability::PortabilityState;
 use search::SearchState;
 #[cfg(target_os = "macos")]
 use tauri::Emitter;
@@ -51,6 +53,7 @@ pub fn run() {
             app.manage(search);
             app.manage(state);
             app.manage(BackupState::default());
+            app.manage(PortabilityState::default());
             backup::start_scheduler(app.handle().clone());
             Ok(())
         })
@@ -64,6 +67,9 @@ pub fn run() {
             commands::create_backup,
             commands::list_backups,
             commands::restore_backup,
+            commands::export_workspace,
+            commands::preview_workspace_import,
+            commands::import_workspace,
             commands::open_document_path,
             commands::list_documents,
             commands::list_document_versions,

@@ -10,7 +10,7 @@ use rusqlite::{params, Connection, OpenFlags, OptionalExtension, TransactionBeha
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
@@ -468,7 +468,8 @@ fn stage_attachments(
         } else {
             let temporary = target.join(format!(".copy-{}", Uuid::new_v4().simple()));
             fs::copy(&canonical, &temporary)?;
-            let copied = File::open(&temporary)?;
+            // FlushFileBuffers requires a writable handle on Windows.
+            let copied = OpenOptions::new().write(true).open(&temporary)?;
             copied.sync_all()?;
             // Windows refuses to rename a staged attachment while any handle
             // remains open, even when the rename stays within one directory.

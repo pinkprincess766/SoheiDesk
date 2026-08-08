@@ -1,9 +1,9 @@
 use crate::atomic_file;
-use crate::db::{with_conn, DbState};
+use crate::db::{with_conn, with_conn_mut, DbState};
 use crate::error::{AppError, AppResult};
 use crate::templates::{self, TemplateField, TemplateRecord};
 use chrono::Utc;
-use rusqlite::params;
+use rusqlite::{params, Transaction, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use uuid::Uuid;
@@ -327,7 +327,21 @@ pub fn list_drafts(db: &DbState) -> AppResult<Vec<JournalDraft>> {
 }
 
 pub fn save_draft(db: &DbState, input: JournalDraftInput) -> AppResult<JournalDraft> {
-    let key = input.draft_key.trim();
+    save_draft_with_hook(db, input, |_| Ok(()))
+}
+
+/// Saves one complete draft as a single immediate transaction. The hook is a
+/// deterministic fault-injection point used to prove that interruption after
+/// the upsert but before commit cannot expose a partial draft.
+fn save_draft_with_hook<F>(
+    db: &DbState,
+    input: JournalDraftInput,
+    before_commit: F,
+) -> AppResult<JournalDraft>
+where
+    F: FnOnce(&Transaction<'_>) -> AppResult<()>,
+{
+    let key = input.draft_key.trim().to_string();
     if key.is_empty() || key.len() > 200 || input.payload.is_null() {
         return Err(AppError::Message("invalid journal draft".into()));
     }
@@ -340,27 +354,40 @@ pub fn save_draft(db: &DbState, input: JournalDraftInput) -> AppResult<JournalDr
         ));
     }
     let now = Utc::now().to_rfc3339();
-    with_conn(db, |conn| {
-        conn.execute(
-            "INSERT INTO journal_drafts
-             (draft_key, entry_id, payload_json, base_updated_at, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?5)
-             ON CONFLICT(draft_key) DO UPDATE SET
-               entry_id=excluded.entry_id,
-               payload_json=excluded.payload_json,
-               base_updated_at=excluded.base_updated_at,
-               updated_at=excluded.updated_at",
-            params![
-                key,
-                input.entry_id,
-                payload_json,
-                input.base_updated_at,
-                now
-            ],
-        )?;
+    with_conn_mut(db, |conn| {
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let write_result = (|| -> AppResult<()> {
+            transaction.execute(
+                "INSERT INTO journal_drafts
+                 (draft_key, entry_id, payload_json, base_updated_at, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?5)
+                 ON CONFLICT(draft_key) DO UPDATE SET
+                   entry_id=excluded.entry_id,
+                   payload_json=excluded.payload_json,
+                   base_updated_at=excluded.base_updated_at,
+                   updated_at=excluded.updated_at",
+                params![
+                    key,
+                    input.entry_id,
+                    payload_json,
+                    input.base_updated_at,
+                    now
+                ],
+            )?;
+            before_commit(&transaction)
+        })();
+        if let Err(error) = write_result {
+            transaction.rollback().map_err(|rollback_error| {
+                AppError::Message(format!(
+                    "draft save failed ({error}); rollback also failed: {rollback_error}"
+                ))
+            })?;
+            return Err(error);
+        }
+        transaction.commit()?;
         Ok(())
     })?;
-    get_draft(db, key)?.ok_or_else(|| AppError::Message("draft save failed".into()))
+    get_draft(db, &key)?.ok_or_else(|| AppError::Message("draft save failed".into()))
 }
 
 pub fn delete_draft(db: &DbState, draft_key: &str) -> AppResult<()> {
@@ -453,7 +480,7 @@ pub fn save_entry_as_template(
 mod tests {
     use super::*;
     use serde_json::json;
-    use std::sync::Mutex;
+    use std::sync::{Arc, Barrier, Mutex};
 
     fn test_state() -> (DbState, std::path::PathBuf) {
         let path =
@@ -571,6 +598,116 @@ mod tests {
         )
         .is_err());
         drop(db);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn simulated_autosave_crash_before_commit_preserves_previous_draft() {
+        let (db, path) = test_state();
+        save_draft(
+            &db,
+            JournalDraftInput {
+                draft_key: "new".into(),
+                entry_id: None,
+                payload: json!({"title": "committed", "body_md": "safe"}),
+                base_updated_at: None,
+            },
+        )
+        .expect("initial draft");
+
+        let error = save_draft_with_hook(
+            &db,
+            JournalDraftInput {
+                draft_key: "new".into(),
+                entry_id: None,
+                payload: json!({"title": "interrupted", "body_md": "partial"}),
+                base_updated_at: None,
+            },
+            |_| Err(AppError::Message("simulated process termination".into())),
+        )
+        .expect_err("fault before commit must abort the autosave");
+
+        assert!(error.to_string().contains("simulated process termination"));
+        let persisted = get_draft(&db, "new")
+            .expect("read committed draft")
+            .expect("committed draft exists");
+        assert_eq!(persisted.payload["title"], "committed");
+        assert_eq!(persisted.payload["body_md"], "safe");
+        drop(db);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn two_near_simultaneous_autosaves_leave_one_complete_payload() {
+        let (db, path) = test_state();
+        let db = Arc::new(db);
+        let barrier = Arc::new(Barrier::new(3));
+        let first_payload = json!({"title": "first", "body_md": "alpha", "fields": {"n": 1}});
+        let second_payload = json!({"title": "second", "body_md": "beta", "fields": {"n": 2}});
+
+        let handles: Vec<_> = [first_payload.clone(), second_payload.clone()]
+            .into_iter()
+            .map(|payload| {
+                let db = Arc::clone(&db);
+                let barrier = Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    save_draft(
+                        &db,
+                        JournalDraftInput {
+                            draft_key: "new".into(),
+                            entry_id: None,
+                            payload,
+                            base_updated_at: None,
+                        },
+                    )
+                })
+            })
+            .collect();
+        barrier.wait();
+        for handle in handles {
+            handle.join().expect("autosave thread").expect("autosave");
+        }
+
+        let stored = get_draft(&db, "new")
+            .expect("read draft")
+            .expect("draft exists")
+            .payload;
+        assert!(stored == first_payload || stored == second_payload);
+        drop(db);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn committed_draft_is_recoverable_after_forced_termination_reopen() {
+        let (db, path) = test_state();
+        save_draft(
+            &db,
+            JournalDraftInput {
+                draft_key: "new".into(),
+                entry_id: None,
+                payload: json!({"title": "recover me", "body_md": "persisted"}),
+                base_updated_at: None,
+            },
+        )
+        .expect("save draft");
+        drop(db);
+
+        // Reopening the file-backed database models a fresh process after the
+        // previous one was terminated without running UI cleanup code.
+        let connection = crate::db::open(&path).expect("reopen database");
+        let reopened = DbState {
+            conn: Mutex::new(connection),
+            media: Mutex::new(()),
+            data_dir: path.parent().expect("database parent").to_path_buf(),
+        };
+        let recovered = get_draft(&reopened, "new")
+            .expect("read recovered draft")
+            .expect("recovered draft exists");
+        assert_eq!(recovered.payload["title"], "recover me");
+        assert_eq!(recovered.payload["body_md"], "persisted");
+
+        drop(reopened);
         let _ = std::fs::remove_file(path);
     }
 }

@@ -14,6 +14,10 @@ import type {
   TemplateRecord,
 } from "../types";
 import { renderMarkdown } from "../utils/markdown";
+import {
+  isRecoverableDraft,
+  persistDraftsBeforeClose,
+} from "../utils/draftLifecycle";
 
 const journal = useJournalStore();
 
@@ -292,10 +296,7 @@ async function flushDraft(): Promise<boolean> {
 async function findRecoverableDraft(entry: JournalEntry | null) {
   const draft = await journal.getDraft(draftKey());
   if (!draft || !hasDraftContent(draft.payload)) return;
-  if (
-    entry &&
-    new Date(draft.updated_at).getTime() <= new Date(entry.updated_at).getTime()
-  ) {
+  if (entry && !isRecoverableDraft(draft.updated_at, entry.updated_at)) {
     await journal.deleteDraft(draft.draft_key);
     return;
   }
@@ -309,15 +310,8 @@ async function scanRecoverableDrafts() {
     if (raw.draft_key === TEMPLATE_DRAFT_KEY) continue;
     const draft = raw as JournalDraft;
     if (!hasDraftContent(draft.payload)) continue;
-    if (!draft.entry_id) {
-      recoverable.push(draft);
-      continue;
-    }
     const entry = journal.entries.find((item) => item.id === draft.entry_id);
-    if (
-      entry &&
-      new Date(draft.updated_at).getTime() > new Date(entry.updated_at).getTime()
-    ) {
+    if (isRecoverableDraft(draft.updated_at, entry?.updated_at)) {
       recoverable.push(draft);
     } else {
       await journal.deleteDraft(draft.draft_key);
@@ -399,15 +393,14 @@ onMounted(async () => {
         screen.value === "edit" && payloadSignature() !== lastDraftSignature;
       const templateDirty =
         screen.value === "templates" && templateSignature() !== lastTemplateSignature;
-      if (!journalDirty && !templateDirty) return;
-      event.preventDefault();
-      const [journalOk, templateOk] = await Promise.all([
-        flushDraft(),
-        persistTemplateDraft(),
-      ]);
-      if (journalOk && templateOk) {
-        await getCurrentWindow().destroy();
-      }
+      await persistDraftsBeforeClose({
+        journalDirty,
+        templateDirty,
+        preventClose: () => event.preventDefault(),
+        flushJournal: flushDraft,
+        flushTemplate: persistTemplateDraft,
+        destroyWindow: () => getCurrentWindow().destroy(),
+      });
     });
   } catch {
     // Browser-only UI development has no Tauri window. Debounce, visibility

@@ -252,7 +252,7 @@ mod tests {
     }
 
     #[test]
-    fn write_failure_preserves_existing_file() {
+    fn simulated_full_disk_preserves_existing_file() {
         let directory = TestDirectory::new();
         let destination = directory.path().join("report.md");
         fs::write(&destination, b"old report").expect("old report");

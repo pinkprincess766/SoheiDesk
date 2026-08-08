@@ -154,6 +154,7 @@ onUnmounted(() => {
         <router-link to="/ocr">OCR</router-link>
         <router-link to="/plugins">Plugins</router-link>
         <router-link to="/settings">Settings</router-link>
+        <router-link to="/diagnostics">Status</router-link>
       </nav>
       <div class="sidebar-footer">
         <div class="theme-row">

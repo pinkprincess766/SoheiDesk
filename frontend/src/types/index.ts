@@ -6,6 +6,65 @@ export interface AppInfo {
   data_dir: string;
 }
 
+export type DiagnosticComponentState =
+  | "available"
+  | "unavailable"
+  | "not_configured"
+  | "not_checked";
+
+export interface DiagnosticComponentStatus {
+  state: DiagnosticComponentState;
+  version: string | null;
+  message: string;
+}
+
+export interface DiagnosticEvent {
+  timestamp: string;
+  level: string;
+  category: string;
+  message: string;
+}
+
+export interface DiagnosticStorageMetric {
+  bytes: number;
+  files: number;
+  accessible: boolean;
+}
+
+export interface DiagnosticReport {
+  format_version: number;
+  generated_at: string;
+  app_version: string;
+  database_schema_version: number | null;
+  supported_schema_version: number;
+  integrity: { ok: boolean; message: string };
+  last_successful_backup: {
+    kind: BackupKind;
+    created_at: string;
+    size_bytes: number;
+    schema_version: number;
+  } | null;
+  storage: {
+    database: DiagnosticStorageMetric;
+    attachments: DiagnosticStorageMetric;
+    media: DiagnosticStorageMetric;
+    search_index: DiagnosticStorageMetric;
+  };
+  components: {
+    pdf_worker: DiagnosticComponentStatus;
+    ocr: DiagnosticComponentStatus;
+    djvu: DiagnosticComponentStatus;
+    chroma_tsvet: DiagnosticComponentStatus;
+  };
+  recent_errors: DiagnosticEvent[];
+}
+
+export interface DiagnosticArchiveResult {
+  file_name: string;
+  size_bytes: number;
+  generated_at: string;
+}
+
 export interface DocumentRecord {
   id: string;
   content_hash: string;

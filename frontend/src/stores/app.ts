@@ -21,18 +21,24 @@ export const useAppStore = defineStore("app", {
           await invoke("set_setting", { key: "ui_theme", value: this.theme });
         }
       } catch (e) {
-        this.error = String(e);
+        this.setError(String(e), "app.startup");
       }
     },
-    setError(message: string | null) {
+    setError(message: string | null, category = "frontend") {
       this.error = message;
+      if (message) {
+        // The backend maps this raw UI error to a finite, content-free
+        // vocabulary before writing it. This call must never mask the original
+        // error if diagnostics are unavailable during startup.
+        void invoke("record_diagnostic_error", { category, message }).catch(() => {});
+      }
     },
     setTheme(theme: "system" | "light" | "dark") {
       this.theme = theme;
       localStorage.setItem("soheidesk-theme", theme);
       applyTheme(theme);
       void invoke("set_setting", { key: "ui_theme", value: theme }).catch((e) => {
-        this.error = String(e);
+        this.setError(String(e), "settings.theme");
       });
     },
   },

@@ -1325,6 +1325,31 @@ mod tests {
     }
 
     #[test]
+    fn lost_attachment_is_reported_without_aborting_workspace_export() {
+        let directory = TestDirectory::new("lost-attachment");
+        let db = state(&directory);
+        let missing = directory.0.join("removed-source.txt");
+        add_source_data(&db, &missing);
+        let output = directory.0.join("workspace.zip");
+
+        let result = export_workspace(&db, &PortabilityState::default(), &output)
+            .expect("workspace export with missing reference");
+
+        assert_eq!(result.attachment_count, 0);
+        assert_eq!(result.missing_references.len(), 2);
+        assert!(result
+            .missing_references
+            .iter()
+            .all(|reference| reference.contains("removed-source.txt")));
+        let extracted = validate_and_extract(&output).expect("valid workspace archive");
+        assert_eq!(
+            extracted.manifest.missing_references,
+            result.missing_references
+        );
+        assert!(extracted.database.is_file());
+    }
+
+    #[test]
     fn preview_and_import_require_explicit_replacement_and_rewrite_paths() {
         let source_directory = TestDirectory::new("source");
         let source_db = state(&source_directory);
@@ -1440,6 +1465,51 @@ mod tests {
                 .total_records(),
             0
         );
+    }
+
+    #[test]
+    fn corrupted_import_archive_is_rejected_during_preview_without_touching_current_data() {
+        let source_directory = TestDirectory::new("corrupt-source");
+        let source_db = state(&source_directory);
+        let external = source_directory.0.join("source.txt");
+        fs::write(&external, b"portable source").expect("external file");
+        add_source_data(&source_db, &external);
+        let package = source_directory.0.join("workspace.zip");
+        export_workspace(&source_db, &PortabilityState::default(), &package)
+            .expect("workspace export");
+        let mut bytes = fs::read(&package).expect("workspace bytes");
+        bytes.truncate(bytes.len() / 2);
+        fs::write(&package, bytes).expect("truncate workspace archive");
+
+        let target_directory = TestDirectory::new("corrupt-target");
+        let target_db = state(&target_directory);
+        target_db
+            .conn
+            .lock()
+            .expect("database lock")
+            .execute(
+                "INSERT INTO settings(key, value) VALUES ('target', 'preserve')",
+                [],
+            )
+            .expect("target sentinel");
+        let portability = PortabilityState::default();
+
+        preview_import(&target_db, &portability, &package)
+            .expect_err("corrupted archive must fail during preview");
+
+        let sentinel: String = target_db
+            .conn
+            .lock()
+            .expect("database lock")
+            .query_row("SELECT value FROM settings WHERE key='target'", [], |row| {
+                row.get(0)
+            })
+            .expect("preserved target sentinel");
+        assert_eq!(sentinel, "preserve");
+        assert!(portability.preview.lock().expect("preview lock").is_none());
+        assert!(backup::list_backups(&target_directory.0)
+            .expect("target backups")
+            .is_empty());
     }
 
     #[test]

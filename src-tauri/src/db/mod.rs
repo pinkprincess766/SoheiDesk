@@ -159,6 +159,23 @@ mod tests {
     }
 
     #[test]
+    fn corrupted_database_is_rejected_without_replacing_its_bytes() {
+        let directory = TestDir::new();
+        let database = directory.0.join("corrupted.sqlite");
+        let corrupted = b"not a SQLite database\0preserve forensic bytes";
+        std::fs::write(&database, corrupted).expect("corrupted database fixture");
+
+        let error = open(&database).expect_err("corrupted database must be rejected");
+
+        assert!(matches!(error, AppError::Db(_)));
+        assert_eq!(
+            std::fs::read(&database).expect("read rejected database"),
+            corrupted
+        );
+        assert!(!database.with_extension("sqlite-wal").exists());
+    }
+
+    #[test]
     fn existing_database_is_archived_before_migration() {
         let directory = TestDir::new();
         let database = directory.0.join("soheidesk.sqlite");

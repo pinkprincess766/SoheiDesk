@@ -36,6 +36,7 @@ required.
 | Draft safety | Journal and template drafts are autosaved to SQLite and can be restored explicitly |
 | Backups | Daily, pre-migration, and manual backups with verified restore and an automatic emergency copy |
 | Data portability | Preview-gated full workspace export/import using a documented ZIP, SQLite, and plain files |
+| Diagnostics | Local health page with integrity, storage, component, backup, and privacy-safe error status |
 | Library and search | Local document history plus full-text search across documents and journal entries |
 | Export | Markdown, HTML, Typst, LaTeX, and DOCX output |
 | References | DOI lookup, arXiv/PubMed search, bibliography export, and read-only Zotero import |
@@ -142,6 +143,15 @@ failed or interrupted export therefore leaves the previous file unchanged. The
 contract covers Markdown, HTML, Typst, LaTeX, DOCX, BibTeX, annotation exports,
 and JSON templates; implementation details are documented in
 [docs/architecture/atomic-file-writes.md](./docs/architecture/atomic-file-writes.md).
+
+The local **Status** page reports the application and database schema versions,
+SQLite `quick_check`, the latest successful backup, storage use, optional tool
+availability, and recent content-free error categories. Its diagnostic ZIP is
+validated before atomic replacement and deliberately excludes the database,
+documents, annotations, notes, settings, URLs, configured paths, and secrets.
+Logs are private, bounded, and rotated. The privacy boundary and archive layout
+are documented in
+[docs/architecture/diagnostics.md](./docs/architecture/diagnostics.md).
 
 SoheiDesk is under active development and is not a validated electronic
 laboratory notebook. Automatic recovery backups protect app-managed data. Use

@@ -60,6 +60,11 @@ const router = createRouter({
       name: "settings",
       component: () => import("../views/SettingsView.vue"),
     },
+    {
+      path: "/diagnostics",
+      name: "diagnostics",
+      component: () => import("../views/DiagnosticsView.vue"),
+    },
   ],
 });
 

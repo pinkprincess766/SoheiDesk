@@ -63,6 +63,13 @@ fn find_djvutxt() -> Option<PathBuf> {
     None
 }
 
+/// Report whether the optional DjVuLibre extractor can be started. The
+/// diagnostics layer intentionally receives only a boolean, never the resolved
+/// executable path.
+pub fn tool_available() -> bool {
+    find_djvutxt().is_some()
+}
+
 fn which_exists(bin: &str) -> bool {
     Command::new(bin)
         .arg("--help")

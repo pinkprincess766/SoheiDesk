@@ -4,6 +4,7 @@ mod backup;
 mod collab;
 mod commands;
 mod db;
+mod diagnostics;
 mod documents;
 mod error;
 mod export;
@@ -22,6 +23,7 @@ mod templates;
 
 use backup::BackupState;
 use collab::CollabState;
+use diagnostics::DiagnosticState;
 use pending_open::PendingOpen;
 use portability::PortabilityState;
 use search::SearchState;
@@ -40,10 +42,17 @@ pub fn run() {
         .manage(pending)
         .setup(|app| {
             let state = db::init(app.handle())?;
+            let diagnostics = DiagnosticState::new(&state.data_dir)?;
             templates::seed_builtins(&state)?;
             export::seed_export_templates(&state)?;
             let _ = plugins::seed_example_plugins(&state);
-            let search = SearchState::open(&state.data_dir)?;
+            let search = match SearchState::open(&state.data_dir) {
+                Ok(search) => search,
+                Err(error) => {
+                    let _ = diagnostics.record_error("search.startup", &error.to_string());
+                    return Err(error.into());
+                }
+            };
             // Tantivy indices are disposable and may need rebuilding after an
             // index-format upgrade or recovery from local corruption.
             if search.needs_reindex() {
@@ -52,6 +61,7 @@ pub fn run() {
             app.manage(CollabState::default());
             app.manage(search);
             app.manage(state);
+            app.manage(diagnostics);
             app.manage(BackupState::default());
             app.manage(PortabilityState::default());
             backup::start_scheduler(app.handle().clone());
@@ -61,6 +71,9 @@ pub fn run() {
             commands::get_app_info,
             commands::take_pending_open_paths,
             commands::quit_app,
+            commands::get_application_diagnostics,
+            commands::record_diagnostic_error,
+            commands::export_diagnostic_archive,
             commands::get_setting,
             commands::set_setting,
             commands::delete_setting,
